@@ -1,6 +1,6 @@
 import type {
   LeaderboardEntry,
-  RoomSnapshot,
+  TtfGameSnapshot,
   RoundResult,
   RoundSnapshot,
   VisibleStatement,
@@ -162,7 +162,7 @@ export function Leaderboard({ entries, title = '최종 순위' }: { entries: Lea
   )
 }
 
-export function PausedNotice({ snapshot }: { snapshot: RoomSnapshot }) {
+export function PausedNotice({ snapshot }: { snapshot: TtfGameSnapshot }) {
   return (
     <section className="paused-card" role="status">
       <span className="pause-illustration" aria-hidden="true"><i /><i /></span>

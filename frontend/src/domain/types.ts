@@ -1,4 +1,4 @@
-export type RoomStatus =
+export type TtfGameStatus =
   | 'LOBBY'
   | 'SUBMISSION'
   | 'READY'
@@ -9,7 +9,9 @@ export type RoomStatus =
   | 'PAUSED'
   | 'FINISHED'
   | 'CANCELLED'
-  | 'EXPIRED'
+
+export type RoomStatus = 'OPEN' | 'IN_GAME' | 'CLOSED' | 'EXPIRED'
+export type GameType = string
 
 export type Audience = 'participant' | 'host' | 'display'
 export type ViewerRole = 'PARTICIPANT' | 'HOST' | 'DISPLAY'
@@ -17,6 +19,9 @@ export type StatementTruth = 'TRUE' | 'FAKE'
 
 export interface RoomSettings {
   max_participants: number
+}
+
+export interface TtfGameSettings {
   statement_min_length: number
   statement_max_length: number
   voting_duration_seconds: number
@@ -32,6 +37,12 @@ export interface RoomSummary {
   joinable: boolean
   participant_count: number
   settings: RoomSettings
+  active_game: GameReference
+}
+
+export interface GameReference {
+  id: string
+  type: GameType
 }
 
 export interface ParticipantSummary {
@@ -104,15 +115,20 @@ export interface LeaderboardEntry {
   is_me: boolean
 }
 
-export interface RoomSnapshot {
+export interface TtfGameSnapshot {
   version: number
   server_time: string
   client_received_at_ms: number
-  room: RoomSummary & {
+  room: RoomSummary
+  game: {
+    id: string
+    type: 'TTF'
+    status: TtfGameStatus
     ready_count: number
     round_count: number
     current_round_number: number | null
-    paused_from_status?: RoomStatus
+    paused_from_status?: TtfGameStatus
+    settings: TtfGameSettings
   }
   viewer: Viewer
   participants?: ParticipantSummary[]
@@ -129,22 +145,31 @@ export interface CreateRoomInput {
   name: string
   settings: {
     max_participants: number
-    statement_max_length: number
-    voting_duration_seconds: number
-    speaker_order: RoomSettings['speaker_order']
-    anonymous_voting: boolean
+  }
+  game: {
+    type: 'TTF'
+    settings: {
+      statement_max_length: number
+      voting_duration_seconds: number
+      speaker_order: TtfGameSettings['speaker_order']
+      anonymous_voting: boolean
+    }
   }
 }
 
 export interface CreateRoomResponse {
-  room_id: string
-  code: string
-  join_url: string
+  room: {
+    id: string
+    code: string
+    join_url: string
+  }
+  game: GameReference
 }
 
 export interface JoinRoomResponse {
   room_id: string
   participant_id: string
+  game: GameReference
 }
 
 export interface StatementDraft {

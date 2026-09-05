@@ -235,7 +235,9 @@ MVP에서는 다음 기능을 제공하지 않는다.
 
 ## 11. 상태 모델
 
-게임방 상태는 서버를 기준으로 다음 순서를 따른다.
+방 수명 주기와 게임 진행 상태를 분리한다. 방은 게임 종류와 무관하게 `OPEN -> IN_GAME -> CLOSED` 순서를 따르고, 비활성 수명 정책에 따라 `EXPIRED`가 될 수 있다. 입장은 `OPEN`에서만 허용한다.
+
+TTF 게임 상태는 서버를 기준으로 다음 순서를 따른다.
 
 ```text
 LOBBY
@@ -253,7 +255,7 @@ LOBBY
 
 - `PAUSED`: 진행자가 일시 중지
 - `CANCELLED`: 진행자가 게임 취소
-- `EXPIRED`: 장기간 미사용 또는 보존 기간 만료
+- `EXPIRED`는 게임 상태가 아니라 방의 장기간 미사용 또는 보존 기간 만료 상태다.
 
 클라이언트가 요청한 전환이 현재 상태에서 유효하지 않으면 서버는 이를 거절해야 한다.
 
@@ -264,27 +266,56 @@ LOBBY
 - `id`
 - `code`
 - `name`
-- `host_token_hash`
+- `status`
+- `settings`
+- `active_game_id`
+- `created_at`
+- `expires_at`
+
+### GameSession
+
+- `id`
+- `room_id`
+- `type`
 - `status`
 - `settings`
 - `current_round_id`
+- `version`
 - `created_at`
-- `expires_at`
 
 ### Participant
 
 - `id`
 - `room_id`
 - `nickname`
-- `session_token_hash`
 - `connection_status`
+- `joined_at`
+
+### Session
+
+- `id`
+- `token_hash`
+- `kind` (`HOST` 또는 `PARTICIPANT`)
+- `expires_at`
+
+### RoomSessionGrant
+
+- `session_id`
+- `room_id`
+- `role`
+- `participant_id` (참가자 권한일 때만)
+
+### TtfPlayer
+
+- `game_id`
+- `participant_id`
 - `is_ready`
 - `score`
-- `joined_at`
 
 ### Statement
 
 - `id`
+- `game_id`
 - `participant_id`
 - `content`
 - `is_fake`
@@ -294,7 +325,7 @@ LOBBY
 ### Round
 
 - `id`
-- `room_id`
+- `game_id`
 - `speaker_participant_id`
 - `round_order`
 - `status`
@@ -314,6 +345,9 @@ LOBBY
 제약 조건:
 
 - `(room_id, nickname)`은 유일해야 한다.
+- `(session_id, room_id, role)` 권한은 유일해야 한다.
+- MVP에서는 방마다 활성 게임이 하나만 존재한다.
+- `(game_id, participant_id)` TTF player는 유일해야 한다.
 - `(round_id, voter_participant_id)`는 유일해야 한다.
 - 참가자 한 명의 문장 중 `is_fake = true`인 문장은 정확히 하나여야 한다.
 
@@ -321,19 +355,34 @@ LOBBY
 
 ### HTTP API
 
-- `POST /api/rooms` — 게임방 생성
-- `GET /api/rooms/:code` — 입장 가능한 방 정보 조회
-- `POST /api/rooms/:code/join` — 참가
-- `POST /api/rooms/:roomId/statements` — 문장 제출
-- `PATCH /api/rooms/:roomId/statements` — 문장 수정
-- `POST /api/rooms/:roomId/start` — 게임 시작
-- `POST /api/rooms/:roomId/rounds/:roundId/voting/start` — 투표 시작
-- `PUT /api/rooms/:roomId/rounds/:roundId/vote` — 투표 등록·변경
-- `POST /api/rooms/:roomId/rounds/:roundId/voting/close` — 투표 마감
-- `POST /api/rooms/:roomId/rounds/:roundId/reveal` — 정답 공개
-- `POST /api/rooms/:roomId/rounds/next` — 다음 라운드
-- `POST /api/rooms/:roomId/finish` — 게임 종료
-- `GET /api/rooms/:roomId/results.csv` — 결과 다운로드
+방 API는 방 코드, 정원, 참가자와 방 수명 주기만 담당한다. 게임별 API는 설정, 입력, 상태 전환, 라운드, 투표와 점수를 담당한다. `room_id`와 `game_id`는 서로 다른 식별자이며, 방 생성 시 선택한 게임을 함께 원자적으로 생성한다.
+
+범용 방 API:
+
+- `POST /api/v1/rooms` — 방과 선택한 게임 생성
+- `GET /api/v1/rooms/by-code/:code` — 입장 가능한 방 정보 조회
+- `POST /api/v1/rooms/:roomId/participants` — 참가
+- `DELETE /api/v1/rooms/:roomId/participants/:participantId` — 시작 전 참가자 내보내기
+- `POST /api/v1/rooms/:roomId/commands/cancel` — 시작 전 방 취소
+
+TTF 게임 API:
+
+- `GET /api/v1/games/ttf/:gameId/snapshot` — 역할별 전체 상태 조회
+- `PUT /api/v1/games/ttf/:gameId/participants/me/statements` — 문장 전체 저장·수정
+- `PUT /api/v1/games/ttf/:gameId/rounds/:roundId/vote` — 투표 등록·변경
+- `POST /api/v1/games/ttf/:gameId/commands/start` — 게임 시작
+- `POST /api/v1/games/ttf/:gameId/rounds/:roundId/commands/start-voting` — 투표 시작
+- `POST /api/v1/games/ttf/:gameId/rounds/:roundId/commands/extend-voting` — 투표 연장
+- `POST /api/v1/games/ttf/:gameId/rounds/:roundId/commands/close-voting` — 투표 마감
+- `POST /api/v1/games/ttf/:gameId/rounds/:roundId/commands/reveal-result` — 정답 공개
+- `POST /api/v1/games/ttf/:gameId/rounds/:roundId/commands/skip` — 라운드 건너뛰기
+- `POST /api/v1/games/ttf/:gameId/commands/next-round` — 다음 라운드
+- `POST /api/v1/games/ttf/:gameId/commands/pause` — 게임 일시 정지
+- `POST /api/v1/games/ttf/:gameId/commands/resume` — 게임 재개
+- `POST /api/v1/games/ttf/:gameId/commands/finish` — 게임 종료
+- `GET /api/v1/games/ttf/:gameId/events` — TTF 상태 변경 SSE
+
+새 게임을 추가할 때 범용 방 API를 복제하지 않고 `/api/v1/games/:gameType` 아래에 해당 게임의 계약을 추가한다. 상세 요청·응답, 권한, 오류와 멱등성 계약은 `docs/api-spec.md`를 따른다.
 
 ### 실시간 이벤트
 
@@ -342,7 +391,7 @@ WebSocket 또는 Server-Sent Events를 사용한다.
 - `participant.joined`
 - `participant.left`
 - `participant.ready_changed`
-- `room.status_changed`
+- `game.status_changed`
 - `round.started`
 - `voting.started`
 - `vote.progress_changed`

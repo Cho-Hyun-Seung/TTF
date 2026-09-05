@@ -14,9 +14,9 @@ import {
 import { PauseIcon, PlayIcon, UsersIcon } from '../components/Icons'
 import { QrCode } from '../components/QrCode'
 import { RoomHeader } from '../components/RoomHeader'
-import type { ParticipantSummary, RoomSnapshot } from '../domain/types'
-import { useRoomSnapshot } from '../hooks/useRoomSnapshot'
-import { ApiError, api } from '../lib/api'
+import type { ParticipantSummary, TtfGameSnapshot } from '../domain/types'
+import { useTtfGameSnapshot } from '../hooks/useTtfGameSnapshot'
+import { ApiError, roomApi, ttfGameApi } from '../lib/api'
 
 function ParticipantList({
   participants,
@@ -56,13 +56,13 @@ function HostLobby({
   onStart,
   onKick,
 }: {
-  snapshot: RoomSnapshot
+  snapshot: TtfGameSnapshot
   busy: boolean
   onStart: () => void
   onKick: (participant: ParticipantSummary) => void
 }) {
   const joinUrl = `${window.location.origin}/join/${snapshot.room.code}`
-  const everyoneReady = snapshot.room.participant_count >= 2 && snapshot.room.ready_count === snapshot.room.participant_count
+  const everyoneReady = snapshot.room.participant_count >= 2 && snapshot.game.ready_count === snapshot.room.participant_count
   return (
     <>
       <div className="host-lobby-grid">
@@ -71,7 +71,7 @@ function HostLobby({
       </div>
       <div className="host-start-bar">
         <div>
-          <strong>{snapshot.room.ready_count} / {snapshot.room.participant_count}명 준비 완료</strong>
+          <strong>{snapshot.game.ready_count} / {snapshot.room.participant_count}명 준비 완료</strong>
           <p>{snapshot.room.participant_count < 2 ? '게임을 시작하려면 참가자가 2명 이상 필요해요.' : everyoneReady ? '모두 준비됐어요. 게임을 시작해 보세요!' : '아직 문장을 작성 중인 참가자가 있어요.'}</p>
         </div>
         <button className="button button--primary" disabled={busy || !everyoneReady} onClick={onStart} type="button">
@@ -82,7 +82,7 @@ function HostLobby({
   )
 }
 
-function HostRound({ snapshot, action, busy }: { snapshot: RoomSnapshot; action: (work: () => Promise<void>) => void; busy: boolean }) {
+function HostRound({ snapshot, action, busy }: { snapshot: TtfGameSnapshot; action: (work: () => Promise<void>) => void; busy: boolean }) {
   const round = snapshot.current_round
   if (!round) return null
   const isLastRound = round.number === round.total
@@ -92,40 +92,40 @@ function HostRound({ snapshot, action, busy }: { snapshot: RoomSnapshot; action:
       <RoundHeading round={round} />
       <div className="host-round-grid">
         <section className="round-main card">
-          {snapshot.room.status === 'RESULT' && round.result ? <ResultPanel result={round.result} /> : <StatementCards statements={round.statements} />}
+          {snapshot.game.status === 'RESULT' && round.result ? <ResultPanel result={round.result} /> : <StatementCards statements={round.statements} />}
         </section>
         <aside className="control-panel">
-          {snapshot.room.status === 'ROUND_INTRO' ? (
+          {snapshot.game.status === 'ROUND_INTRO' ? (
             <>
               <p className="eyebrow">발표 준비</p>
               <h2>{round.speaker.nickname}님의 설명을 들어보세요</h2>
               <p>설명이 끝난 뒤 투표를 시작하세요.</p>
-              <button className="button button--primary button--block" disabled={busy} onClick={() => action(() => api.startVoting(snapshot.room.id, round.id))} type="button"><PlayIcon /> 투표 시작</button>
-              <button className="button button--secondary button--block" disabled={busy} onClick={() => action(() => api.skipRound(snapshot.room.id, round.id))} type="button">이 라운드 건너뛰기</button>
+              <button className="button button--primary button--block" disabled={busy} onClick={() => action(() => ttfGameApi.startVoting(snapshot.game.id, round.id))} type="button"><PlayIcon /> 투표 시작</button>
+              <button className="button button--secondary button--block" disabled={busy} onClick={() => action(() => ttfGameApi.skipRound(snapshot.game.id, round.id))} type="button">이 라운드 건너뛰기</button>
             </>
           ) : null}
-          {snapshot.room.status === 'VOTING' ? (
+          {snapshot.game.status === 'VOTING' ? (
             <>
               <Countdown clientReceivedAt={snapshot.client_received_at_ms} endsAt={round.voting_ends_at} large serverTime={snapshot.server_time} />
               <VoteProgress {...round.vote_progress} />
-              <button className="button button--secondary button--block" disabled={busy} onClick={() => action(() => api.extendVoting(snapshot.room.id, round.id))} type="button">15초 연장</button>
-              <button className="button button--danger-ghost button--block" disabled={busy} onClick={() => action(() => api.closeVoting(snapshot.room.id, round.id))} type="button">투표 조기 마감</button>
+              <button className="button button--secondary button--block" disabled={busy} onClick={() => action(() => ttfGameApi.extendVoting(snapshot.game.id, round.id))} type="button">15초 연장</button>
+              <button className="button button--danger-ghost button--block" disabled={busy} onClick={() => action(() => ttfGameApi.closeVoting(snapshot.game.id, round.id))} type="button">투표 조기 마감</button>
             </>
           ) : null}
-          {snapshot.room.status === 'VOTE_CLOSED' ? (
+          {snapshot.game.status === 'VOTE_CLOSED' ? (
             <>
               <span className="closed-symbol" aria-hidden="true">✓</span>
               <p className="eyebrow">투표 완료</p>
               <h2>이제 정답을 공개할까요?</h2>
               <VoteProgress {...round.vote_progress} />
-              <button className="button button--primary button--block" disabled={busy} onClick={() => action(() => api.revealResult(snapshot.room.id, round.id))} type="button">정답 공개</button>
+              <button className="button button--primary button--block" disabled={busy} onClick={() => action(() => ttfGameApi.revealResult(snapshot.game.id, round.id))} type="button">정답 공개</button>
             </>
           ) : null}
-          {snapshot.room.status === 'RESULT' ? (
+          {snapshot.game.status === 'RESULT' ? (
             <>
               <p className="eyebrow">라운드 완료</p>
               <h2>{isLastRound ? '모든 이야기를 들었어요!' : '다음 사람을 만나볼까요?'}</h2>
-              <button className="button button--primary button--block" disabled={busy} onClick={() => action(() => api.nextRound(snapshot.room.id))} type="button">
+              <button className="button button--primary button--block" disabled={busy} onClick={() => action(() => ttfGameApi.nextRound(snapshot.game.id))} type="button">
                 {isLastRound ? '최종 순위 보기' : '다음 라운드'}
               </button>
             </>
@@ -137,8 +137,8 @@ function HostRound({ snapshot, action, busy }: { snapshot: RoomSnapshot; action:
 }
 
 export function HostRoomPage() {
-  const { roomId } = useParams()
-  const { snapshot, error, loading, connection, refresh } = useRoomSnapshot(roomId, 'host')
+  const { gameId } = useParams()
+  const { snapshot, error, loading, connection, refresh } = useTtfGameSnapshot(gameId, 'host')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
 
@@ -158,18 +158,18 @@ export function HostRoomPage() {
 
   const kick = (participant: ParticipantSummary) => {
     if (!window.confirm(`${participant.nickname}님을 게임방에서 내보낼까요?`)) return
-    void action(() => api.kickParticipant(snapshot?.room.id ?? '', participant.id))
+    void action(() => roomApi.removeParticipant(snapshot?.room.id ?? '', participant.id))
   }
 
   let content: ReactNode = null
   if (snapshot) {
-    if (['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.room.status)) {
-      content = <HostLobby busy={busy} onKick={kick} onStart={() => void action(() => api.startGame(snapshot.room.id))} snapshot={snapshot} />
-    } else if (snapshot.room.status === 'PAUSED') {
+    if (['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.game.status)) {
+      content = <HostLobby busy={busy} onKick={kick} onStart={() => void action(() => ttfGameApi.start(snapshot.game.id))} snapshot={snapshot} />
+    } else if (snapshot.game.status === 'PAUSED') {
       content = <PausedNotice snapshot={snapshot} />
-    } else if (['ROUND_INTRO', 'VOTING', 'VOTE_CLOSED', 'RESULT'].includes(snapshot.room.status)) {
+    } else if (['ROUND_INTRO', 'VOTING', 'VOTE_CLOSED', 'RESULT'].includes(snapshot.game.status)) {
       content = <HostRound action={(work) => void action(work)} busy={busy} snapshot={snapshot} />
-    } else if (snapshot.room.status === 'FINISHED') {
+    } else if (snapshot.game.status === 'FINISHED') {
       content = <Leaderboard entries={snapshot.leaderboard ?? []} />
     } else {
       content = <ErrorView message="이 게임은 더 이상 진행할 수 없어요." title="게임이 종료되었어요" action={<Link className="button button--secondary" to="/">홈으로 돌아가기</Link>} />
@@ -177,32 +177,32 @@ export function HostRoomPage() {
   }
 
   if (loading) return <AppShell><LoadingView /></AppShell>
-  if (error || !snapshot || !roomId) {
+  if (error || !snapshot || !gameId) {
     return <AppShell><ErrorView message={error?.message ?? '진행자 화면을 불러오지 못했어요.'} onRetry={() => void refresh()} /></AppShell>
   }
 
-  const activeGame = ['ROUND_INTRO', 'VOTING', 'VOTE_CLOSED', 'RESULT', 'PAUSED'].includes(snapshot.room.status)
-  const canEnd = !['FINISHED', 'CANCELLED', 'EXPIRED'].includes(snapshot.room.status)
+  const activeGame = ['ROUND_INTRO', 'VOTING', 'VOTE_CLOSED', 'RESULT', 'PAUSED'].includes(snapshot.game.status)
+  const canEnd = !['FINISHED', 'CANCELLED'].includes(snapshot.game.status)
 
   const endGame = () => {
-    const beforeStart = ['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.room.status)
+    const beforeStart = ['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.game.status)
     const message = beforeStart
       ? '게임방을 취소할까요? 참가자는 더 이상 이 방에 들어올 수 없어요.'
       : '게임을 지금 종료할까요? 현재까지의 점수로 최종 순위가 표시돼요.'
     if (!window.confirm(message)) return
-    void action(() => beforeStart ? api.cancelGame(snapshot.room.id) : api.finishGame(snapshot.room.id))
+    void action(() => beforeStart ? roomApi.cancel(snapshot.room.id) : ttfGameApi.finish(snapshot.game.id))
   }
 
   return (
     <AppShell
       headerAside={
         <div className="host-top-actions">
-          <a className="text-link" href={`/display/${snapshot.room.id}`} rel="noreferrer" target="_blank">공용 화면 열기</a>
+          <a className="text-link" href={`/display/${snapshot.game.id}`} rel="noreferrer" target="_blank">공용 화면 열기</a>
           {activeGame ? (
-            snapshot.room.status === 'PAUSED' ? (
-              <button className="icon-button" disabled={busy} onClick={() => void action(() => api.resumeGame(snapshot.room.id))} type="button"><PlayIcon /> 재개</button>
+            snapshot.game.status === 'PAUSED' ? (
+              <button className="icon-button" disabled={busy} onClick={() => void action(() => ttfGameApi.resume(snapshot.game.id))} type="button"><PlayIcon /> 재개</button>
             ) : (
-              <button className="icon-button" disabled={busy} onClick={() => void action(() => api.pauseGame(snapshot.room.id))} type="button"><PauseIcon /> 일시 정지</button>
+              <button className="icon-button" disabled={busy} onClick={() => void action(() => ttfGameApi.pause(snapshot.game.id))} type="button"><PauseIcon /> 일시 정지</button>
             )
           ) : null}
           {canEnd ? <button className="top-danger-action" disabled={busy} onClick={endGame} type="button">게임 종료</button> : null}

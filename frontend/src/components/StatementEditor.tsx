@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import type { StatementDraft } from '../domain/types'
 import { characterCount, validateStatements } from '../domain/validation'
-import { ApiError, api } from '../lib/api'
+import { ApiError, ttfGameApi } from '../lib/api'
 import { InlineError } from './Feedback'
 
 const INITIAL_STATEMENTS: StatementDraft[] = [
@@ -11,13 +11,13 @@ const INITIAL_STATEMENTS: StatementDraft[] = [
 ]
 
 export function StatementEditor({
-  roomId,
+  gameId,
   minLength,
   maxLength,
   initialStatements,
   onSaved,
 }: {
-  roomId: string
+  gameId: string
   minLength: number
   maxLength: number
   initialStatements?: StatementDraft[]
@@ -47,7 +47,7 @@ export function StatementEditor({
 
     setBusy(true)
     try {
-      await api.saveStatements(roomId, statements)
+      await ttfGameApi.saveStatements(gameId, statements)
       await onSaved()
     } catch (caught) {
       setServerError(caught instanceof ApiError ? caught.message : '문장을 저장하지 못했어요. 다시 시도해 주세요.')

@@ -13,9 +13,9 @@ export default function App() {
       <Route element={<HomePage />} path="/" />
       <Route element={<CreateRoomPage />} path="/rooms/new" />
       <Route element={<JoinRoomPage />} path="/join/:code" />
-      <Route element={<ParticipantRoomPage />} path="/play/:roomId" />
-      <Route element={<HostRoomPage />} path="/host/:roomId" />
-      <Route element={<DisplayPage />} path="/display/:roomId" />
+      <Route element={<ParticipantRoomPage />} path="/play/:gameId" />
+      <Route element={<HostRoomPage />} path="/host/:gameId" />
+      <Route element={<DisplayPage />} path="/display/:gameId" />
       <Route element={<NotFoundPage />} path="*" />
     </Routes>
   )

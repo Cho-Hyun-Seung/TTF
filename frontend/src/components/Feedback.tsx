@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { ConnectionState } from '../hooks/useRoomSnapshot'
+import type { ConnectionState } from '../hooks/useTtfGameSnapshot'
 import { RefreshIcon, WifiOffIcon } from './Icons'
 
 export function ConnectionBanner({ state }: { state: ConnectionState }) {

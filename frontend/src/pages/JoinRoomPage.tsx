@@ -5,7 +5,7 @@ import { ErrorView, InlineError, LoadingView } from '../components/Feedback'
 import { ArrowRightIcon, UsersIcon } from '../components/Icons'
 import type { RoomSummary } from '../domain/types'
 import { normalizeRoomCode, ROOM_CODE_PATTERN, validateNickname } from '../domain/validation'
-import { ApiError, api } from '../lib/api'
+import { ApiError, roomApi } from '../lib/api'
 
 export function JoinRoomPage() {
   const params = useParams()
@@ -26,7 +26,7 @@ function JoinRoomContent({ code }: { code: string }) {
   useEffect(() => {
     if (!validCode) return
     const controller = new AbortController()
-    void api.getRoomByCode(code, controller.signal)
+    void roomApi.getByCode(code, controller.signal)
       .then((nextRoom) => setRoom(nextRoom))
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === 'AbortError') return
@@ -51,8 +51,9 @@ function JoinRoomContent({ code }: { code: string }) {
     setBusy(true)
     setError('')
     try {
-      const joined = await api.joinRoom(room.id, nickname)
-      navigate(`/play/${joined.room_id}`, { replace: true })
+      const joined = await roomApi.join(room.id, nickname)
+      if (joined.game.type !== 'TTF') throw new Error('지원하지 않는 게임 유형이에요.')
+      navigate(`/play/${joined.game.id}`, { replace: true })
     } catch (caught) {
       if (caught instanceof ApiError) setError(caught.message)
       else setError('방에 입장하지 못했어요. 잠시 후 다시 시도해 주세요.')
@@ -68,6 +69,18 @@ function JoinRoomContent({ code }: { code: string }) {
         <ErrorView
           message={loadError || '게임방을 찾지 못했어요.'}
           action={<Link className="button button--secondary" to="/">다른 코드 입력하기</Link>}
+        />
+      </AppShell>
+    )
+  }
+
+  if (room.active_game.type !== 'TTF') {
+    return (
+      <AppShell compact>
+        <ErrorView
+          title="지원하지 않는 게임이에요"
+          message="이 버전에서는 해당 게임에 참여할 수 없어요. 최신 버전으로 다시 시도해 주세요."
+          action={<Link className="button button--secondary" to="/">홈으로 돌아가기</Link>}
         />
       </AppShell>
     )

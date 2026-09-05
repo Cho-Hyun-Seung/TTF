@@ -25,8 +25,14 @@ npm run preview
 - `/` — 홈 및 방 코드 입력
 - `/rooms/new` — 게임방 생성
 - `/join/:code` — 닉네임 입력 및 참여
-- `/play/:roomId` — 참가자 게임 화면
-- `/host/:roomId` — 진행자 제어 화면
-- `/display/:roomId` — 16:9 공용 화면
+- `/play/:gameId` — 참가자 TTF 게임 화면
+- `/host/:gameId` — 진행자 TTF 제어 화면
+- `/display/:gameId` — 16:9 TTF 공용 화면
 
 세션 자격 증명은 프론트엔드가 직접 저장하지 않습니다. 백엔드가 발급한 Secure, HttpOnly 쿠키를 `credentials: include`로 사용합니다.
+
+## API 경계
+
+- `src/lib/api/rooms.ts`는 방 생성, 코드 조회, 참가, 내보내기와 취소만 담당합니다.
+- `src/lib/api/ttf.ts`는 TTF snapshot, 문장, 투표, 진행 명령과 SSE만 담당합니다.
+- 방 생성·참가 응답의 `game.id`를 플레이 라우트와 게임 API에 사용하며 `room.id`를 대신 사용하지 않습니다.

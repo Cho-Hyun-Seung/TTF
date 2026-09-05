@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Audience, RoomSnapshot } from '../domain/types'
-import { ApiError, api, realtimeUrl } from '../lib/api'
+import type { Audience, TtfGameSnapshot } from '../domain/types'
+import { ApiError, ttfGameApi, ttfRealtimeUrl } from '../lib/api'
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting'
 
-const ROOM_EVENTS = [
+const TTF_GAME_EVENTS = [
   'participant.joined',
   'participant.left',
   'participant.ready_changed',
-  'room.status_changed',
+  'game.status_changed',
   'round.started',
   'voting.started',
   'vote.progress_changed',
@@ -16,11 +16,11 @@ const ROOM_EVENTS = [
   'round.result_revealed',
   'score.updated',
   'game.finished',
-  'room.sync_required',
+  'game.sync_required',
 ] as const
 
-export function useRoomSnapshot(roomId: string | undefined, audience: Audience) {
-  const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null)
+export function useTtfGameSnapshot(gameId: string | undefined, audience: Audience) {
+  const [snapshot, setSnapshot] = useState<TtfGameSnapshot | null>(null)
   const [error, setError] = useState<ApiError | Error | null>(null)
   const [loading, setLoading] = useState(true)
   const [connection, setConnection] = useState<ConnectionState>('connecting')
@@ -28,12 +28,12 @@ export function useRoomSnapshot(roomId: string | undefined, audience: Audience) 
   const versionRef = useRef(0)
 
   const refresh = useCallback(async () => {
-    if (!roomId) return
+    if (!gameId) return
     requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
     try {
-      const next = await api.getSnapshot(roomId, audience, controller.signal)
+      const next = await ttfGameApi.getSnapshot(gameId, audience, controller.signal)
       versionRef.current = next.version
       setSnapshot(next)
       setError(null)
@@ -43,7 +43,7 @@ export function useRoomSnapshot(roomId: string | undefined, audience: Audience) 
     } finally {
       if (requestRef.current === controller) setLoading(false)
     }
-  }, [audience, roomId])
+  }, [audience, gameId])
 
   useEffect(() => {
     versionRef.current = 0
@@ -55,8 +55,8 @@ export function useRoomSnapshot(roomId: string | undefined, audience: Audience) 
   }, [refresh])
 
   useEffect(() => {
-    if (!roomId) return
-    const source = new EventSource(realtimeUrl(roomId, audience), { withCredentials: true })
+    if (!gameId) return
+    const source = new EventSource(ttfRealtimeUrl(gameId, audience), { withCredentials: true })
 
     source.onopen = () => {
       setConnection('connected')
@@ -64,7 +64,7 @@ export function useRoomSnapshot(roomId: string | undefined, audience: Audience) 
     }
     source.onerror = () => setConnection('reconnecting')
 
-    const onRoomEvent = (event: MessageEvent<string>) => {
+    const onGameEvent = (event: MessageEvent<string>) => {
       try {
         const payload = JSON.parse(event.data) as { version?: number }
         if (payload.version !== undefined && payload.version <= versionRef.current) return
@@ -74,13 +74,13 @@ export function useRoomSnapshot(roomId: string | undefined, audience: Audience) 
       void refresh()
     }
 
-    ROOM_EVENTS.forEach((name) => source.addEventListener(name, onRoomEvent as EventListener))
+    TTF_GAME_EVENTS.forEach((name) => source.addEventListener(name, onGameEvent as EventListener))
 
     return () => {
-      ROOM_EVENTS.forEach((name) => source.removeEventListener(name, onRoomEvent as EventListener))
+      TTF_GAME_EVENTS.forEach((name) => source.removeEventListener(name, onGameEvent as EventListener))
       source.close()
     }
-  }, [audience, refresh, roomId])
+  }, [audience, refresh, gameId])
 
   useEffect(() => {
     if (connection !== 'reconnecting') return

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { AppShell, StepLabel } from '../components/AppShell'
 import { InlineError } from '../components/Feedback'
 import { ArrowRightIcon } from '../components/Icons'
-import { ApiError, api } from '../lib/api'
+import { ApiError, roomApi } from '../lib/api'
 
 export function CreateRoomPage() {
   const navigate = useNavigate()
@@ -37,17 +37,23 @@ export function CreateRoomPage() {
     }
     setBusy(true)
     try {
-      const room = await api.createRoom({
+      const created = await roomApi.create({
         name: name.trim(),
         settings: {
           max_participants: maxParticipants,
-          statement_max_length: statementMaxLength,
-          voting_duration_seconds: votingDuration,
-          speaker_order: speakerOrder,
-          anonymous_voting: anonymousVoting,
+        },
+        game: {
+          type: 'TTF',
+          settings: {
+            statement_max_length: statementMaxLength,
+            voting_duration_seconds: votingDuration,
+            speaker_order: speakerOrder,
+            anonymous_voting: anonymousVoting,
+          },
         },
       })
-      navigate(`/host/${room.room_id}`, { replace: true })
+      if (created.game.type !== 'TTF') throw new Error('지원하지 않는 게임 유형이에요.')
+      navigate(`/host/${created.game.id}`, { replace: true })
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : '방을 만들지 못했어요. 잠시 후 다시 시도해 주세요.')
     } finally {

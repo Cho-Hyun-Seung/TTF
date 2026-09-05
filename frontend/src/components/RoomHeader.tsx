@@ -1,8 +1,8 @@
-import type { RoomSnapshot, RoomStatus } from '../domain/types'
-import type { ConnectionState } from '../hooks/useRoomSnapshot'
+import type { TtfGameSnapshot, TtfGameStatus } from '../domain/types'
+import type { ConnectionState } from '../hooks/useTtfGameSnapshot'
 import { ConnectionBanner } from './Feedback'
 
-const STATUS_LABELS: Record<RoomStatus, string> = {
+const STATUS_LABELS: Record<TtfGameStatus, string> = {
   LOBBY: '입장 중',
   SUBMISSION: '문장 작성 중',
   READY: '시작 대기',
@@ -13,7 +13,6 @@ const STATUS_LABELS: Record<RoomStatus, string> = {
   PAUSED: '일시 정지',
   FINISHED: '게임 종료',
   CANCELLED: '게임 취소',
-  EXPIRED: '방 만료',
 }
 
 export function RoomHeader({
@@ -21,7 +20,7 @@ export function RoomHeader({
   connection,
   display = false,
 }: {
-  snapshot: RoomSnapshot
+  snapshot: TtfGameSnapshot
   connection: ConnectionState
   display?: boolean
 }) {
@@ -33,9 +32,9 @@ export function RoomHeader({
           <p className="eyebrow">방 코드 {snapshot.room.code}</p>
           <h1>{snapshot.room.name}</h1>
         </div>
-        <span className={`status-badge status-badge--${snapshot.room.status.toLowerCase()}`}>
+        <span className={`status-badge status-badge--${snapshot.game.status.toLowerCase()}`}>
           <span aria-hidden="true" />
-          {STATUS_LABELS[snapshot.room.status]}
+          {STATUS_LABELS[snapshot.game.status]}
         </span>
       </div>
     </>

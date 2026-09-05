@@ -14,11 +14,11 @@ import {
 import { CheckIcon } from '../components/Icons'
 import { RoomHeader } from '../components/RoomHeader'
 import { StatementEditor } from '../components/StatementEditor'
-import type { RoomSnapshot, RoundSnapshot } from '../domain/types'
-import { useRoomSnapshot } from '../hooks/useRoomSnapshot'
-import { ApiError, api } from '../lib/api'
+import type { RoundSnapshot, TtfGameSnapshot } from '../domain/types'
+import { useTtfGameSnapshot } from '../hooks/useTtfGameSnapshot'
+import { ApiError, ttfGameApi } from '../lib/api'
 
-function WaitingForStart({ snapshot, onEdit }: { snapshot: RoomSnapshot; onEdit: () => void }) {
+function WaitingForStart({ snapshot, onEdit }: { snapshot: TtfGameSnapshot; onEdit: () => void }) {
   return (
     <section className="waiting-card">
       <span className="ready-check"><CheckIcon /></span>
@@ -26,7 +26,7 @@ function WaitingForStart({ snapshot, onEdit }: { snapshot: RoomSnapshot; onEdit:
       <h2>문장이 안전하게 저장되었어요</h2>
       <p>모두 준비되면 진행자가 게임을 시작할 거예요.</p>
       <div className="waiting-card__count">
-        <strong>{snapshot.room.ready_count}</strong>
+        <strong>{snapshot.game.ready_count}</strong>
         <span>/ {snapshot.room.participant_count}명 준비</span>
       </div>
       <div className="waiting-dots" aria-hidden="true"><span /><span /><span /></div>
@@ -36,12 +36,12 @@ function WaitingForStart({ snapshot, onEdit }: { snapshot: RoomSnapshot; onEdit:
 }
 
 function ParticipantRound({
-  roomId,
+  gameId,
   snapshot,
   refresh,
 }: {
-  roomId: string
-  snapshot: RoomSnapshot
+  gameId: string
+  snapshot: TtfGameSnapshot
   refresh: () => Promise<void>
 }) {
   const round = snapshot.current_round as RoundSnapshot
@@ -53,7 +53,7 @@ function ParticipantRound({
     setPendingId(statementId)
     setError('')
     try {
-      await api.submitVote(roomId, round.id, statementId)
+      await ttfGameApi.submitVote(gameId, round.id, statementId)
       await refresh()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : '투표를 저장하지 못했어요. 다시 시도해 주세요.')
@@ -62,7 +62,7 @@ function ParticipantRound({
     }
   }
 
-  if (snapshot.room.status === 'RESULT' && round.result) {
+  if (snapshot.game.status === 'RESULT' && round.result) {
     const myScore = round.result.score_changes.find((change) => change.participant_id === snapshot.viewer.participant_id)
     return (
       <>
@@ -83,7 +83,7 @@ function ParticipantRound({
       <RoundHeading round={round} />
       <div className="round-layout">
         <section className="round-main">
-          {snapshot.room.status === 'ROUND_INTRO' ? (
+          {snapshot.game.status === 'ROUND_INTRO' ? (
             <>
               <div className="section-heading"><p className="eyebrow">세 문장</p><h2>가짜 같은 문장을 눈여겨보세요</h2></div>
               <StatementCards statements={round.statements} />
@@ -91,7 +91,7 @@ function ParticipantRound({
             </>
           ) : null}
 
-          {snapshot.room.status === 'VOTING' && isSpeaker ? (
+          {snapshot.game.status === 'VOTING' && isSpeaker ? (
             <section className="speaker-wait">
               <Countdown clientReceivedAt={snapshot.client_received_at_ms} endsAt={round.voting_ends_at} serverTime={snapshot.server_time} />
               <span className="speaker-badge">내 이야기</span>
@@ -101,7 +101,7 @@ function ParticipantRound({
             </section>
           ) : null}
 
-          {snapshot.room.status === 'VOTING' && !isSpeaker ? (
+          {snapshot.game.status === 'VOTING' && !isSpeaker ? (
             <>
               <div className="vote-heading">
                 <div><p className="eyebrow">당신의 선택은?</p><h2>가짜 문장 하나를 골라주세요</h2></div>
@@ -119,7 +119,7 @@ function ParticipantRound({
             </>
           ) : null}
 
-          {snapshot.room.status === 'VOTE_CLOSED' ? (
+          {snapshot.game.status === 'VOTE_CLOSED' ? (
             <section className="speaker-wait">
               <span className="closed-symbol" aria-hidden="true">✓</span>
               <p className="eyebrow">투표 마감</p>
@@ -134,12 +134,12 @@ function ParticipantRound({
 }
 
 export function ParticipantRoomPage() {
-  const { roomId } = useParams()
-  const { snapshot, error, loading, connection, refresh } = useRoomSnapshot(roomId, 'participant')
+  const { gameId } = useParams()
+  const { snapshot, error, loading, connection, refresh } = useTtfGameSnapshot(gameId, 'participant')
   const [editing, setEditing] = useState(false)
 
   if (loading) return <AppShell compact><LoadingView /></AppShell>
-  if (error || !snapshot || !roomId) {
+  if (error || !snapshot || !gameId) {
     const expired = error instanceof ApiError && ['ROOM_EXPIRED', 'ROOM_NOT_FOUND'].includes(error.code)
     return (
       <AppShell compact>
@@ -153,7 +153,7 @@ export function ParticipantRoomPage() {
     )
   }
 
-  if (snapshot.room.status === 'CANCELLED' || snapshot.room.status === 'EXPIRED') {
+  if (snapshot.game.status === 'CANCELLED' || snapshot.room.status === 'EXPIRED') {
     return <AppShell compact><ErrorView title="게임이 종료되었어요" message="진행자가 게임을 취소했거나 게임방이 만료되었어요." action={<Link className="button button--secondary" to="/">홈으로 돌아가기</Link>} /></AppShell>
   }
 
@@ -161,27 +161,27 @@ export function ParticipantRoomPage() {
     <AppShell compact headerAside={<span className="viewer-name">{snapshot.viewer.nickname}</span>}>
       <RoomHeader connection={connection} snapshot={snapshot} />
       <div className="game-content">
-        {snapshot.room.status === 'PAUSED' ? <PausedNotice snapshot={snapshot} /> : null}
-        {['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.room.status) && (!snapshot.viewer.is_ready || editing) ? (
+        {snapshot.game.status === 'PAUSED' ? <PausedNotice snapshot={snapshot} /> : null}
+        {['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.game.status) && (!snapshot.viewer.is_ready || editing) ? (
           <StatementEditor
             initialStatements={editing ? snapshot.my_statements?.map((statement) => ({
               content: statement.content,
               truth: statement.is_fake ? 'FAKE' : 'TRUE',
             })) : undefined}
-            maxLength={snapshot.room.settings.statement_max_length}
-            minLength={snapshot.room.settings.statement_min_length}
+            maxLength={snapshot.game.settings.statement_max_length}
+            minLength={snapshot.game.settings.statement_min_length}
             onSaved={async () => {
               setEditing(false)
               await refresh()
             }}
-            roomId={roomId}
+            gameId={gameId}
           />
         ) : null}
-        {['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.room.status) && snapshot.viewer.is_ready && !editing ? <WaitingForStart onEdit={() => setEditing(true)} snapshot={snapshot} /> : null}
-        {['ROUND_INTRO', 'VOTING', 'VOTE_CLOSED', 'RESULT'].includes(snapshot.room.status) && snapshot.current_round ? (
-          <ParticipantRound key={snapshot.current_round.id} refresh={refresh} roomId={roomId} snapshot={snapshot} />
+        {['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.game.status) && snapshot.viewer.is_ready && !editing ? <WaitingForStart onEdit={() => setEditing(true)} snapshot={snapshot} /> : null}
+        {['ROUND_INTRO', 'VOTING', 'VOTE_CLOSED', 'RESULT'].includes(snapshot.game.status) && snapshot.current_round ? (
+          <ParticipantRound key={snapshot.current_round.id} refresh={refresh} gameId={gameId} snapshot={snapshot} />
         ) : null}
-        {snapshot.room.status === 'FINISHED' ? <Leaderboard entries={snapshot.leaderboard ?? []} /> : null}
+        {snapshot.game.status === 'FINISHED' ? <Leaderboard entries={snapshot.leaderboard ?? []} /> : null}
       </div>
     </AppShell>
   )
