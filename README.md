@@ -1,32 +1,39 @@
-# TTF Frontend
+# TTF (Truth Truth Fake)
 
-모바일 참가자, 진행자, 프로젝터용 공용 화면을 제공하는 React 프론트엔드입니다. 백엔드 계약은 루트의 `docs/api-spec.md`를 따릅니다.
+QR 코드로 참가하는 실시간 진진가 플랫폼입니다. 진행자가 게임방을 만들면 참가자는 별도 회원가입이나 앱 설치 없이 모바일 웹으로 참여할 수 있습니다.
 
-## 실행
+## 저장소 구조
+
+```text
+ttf/
+├── frontend/        React + TypeScript 프론트엔드
+├── backend/         백엔드 구현 디렉터리
+├── docs/            API 및 기술 문서
+└── platformprd.md   제품 요구사항
+```
+
+## 프론트엔드 실행
 
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-개발 서버는 기본적으로 `/api` 요청을 `http://localhost:8080`으로 프록시합니다. 다른 백엔드 주소를 사용할 때는 `.env.example`을 참고해 `VITE_DEV_API_TARGET`을 설정합니다. 배포 환경에서 API가 다른 origin에 있다면 `VITE_API_BASE_URL`을 지정하고, 백엔드의 credential 포함 CORS와 쿠키 설정을 함께 구성해야 합니다.
+개발 서버는 기본적으로 백엔드 `http://localhost:8080`으로 `/api` 요청을 프록시합니다. 자세한 내용은 [프론트엔드 README](frontend/README.md)를 참고하세요.
 
-## 명령어
+## 문서
+
+- [제품 요구사항](platformprd.md)
+- [API 명세](docs/api-spec.md)
+- [저장소 작업 규칙](AGENTS.md)
+
+## 검증
 
 ```bash
+cd frontend
 npm run lint
 npm run test
 npm run build
-npm run preview
 ```
 
-## 라우트
-
-- `/` — 홈 및 방 코드 입력
-- `/rooms/new` — 게임방 생성
-- `/join/:code` — 닉네임 입력 및 참여
-- `/play/:roomId` — 참가자 게임 화면
-- `/host/:roomId` — 진행자 제어 화면
-- `/display/:roomId` — 16:9 공용 화면
-
-세션 자격 증명은 프론트엔드가 직접 저장하지 않습니다. 백엔드가 발급한 Secure, HttpOnly 쿠키를 `credentials: include`로 사용합니다.

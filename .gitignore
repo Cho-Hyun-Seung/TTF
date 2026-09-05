@@ -1,6 +1,26 @@
+# Dependencies
 node_modules/
+
+# Build and test output
 dist/
+coverage/
+*.tsbuildinfo
+
+# Local environment variables
 .env
 .env.local
 .env.*.local
-*.tsbuildinfo
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editor and operating system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
