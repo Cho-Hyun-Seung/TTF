@@ -26,6 +26,8 @@ npm run dev
 
 - [제품 요구사항](platformprd.md)
 - [API 명세](docs/api-spec.md)
+- [API request record 명세](docs/api-request-records.md)
+- [API response record 명세](docs/api-response-records.md)
 - [저장소 작업 규칙](AGENTS.md)
 
 ## 검증

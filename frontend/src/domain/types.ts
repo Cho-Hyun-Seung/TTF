@@ -126,7 +126,7 @@ export interface TtfGameSnapshot {
     status: TtfGameStatus
     ready_count: number
     round_count: number
-    current_round_number: number | null
+    current_round_number?: number
     paused_from_status?: TtfGameStatus
     settings: TtfGameSettings
   }

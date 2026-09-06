@@ -1,198 +1,316 @@
-# TTF 게임 플랫폼 API 명세
+# TTF API 명세
 
 - 버전: `v1`
-- 기준 문서: `platformprd.md` v0.1
-- 대상: React 프론트엔드와 게임 플랫폼 백엔드
+- 기준일: `2026-09-06`
 - Base path: `/api/v1`
-- 데이터 형식: JSON, UTF-8, 필드명 `snake_case`
+- 데이터 형식: JSON UTF-8, `snake_case`
 - 실시간 전송: Server-Sent Events(SSE)
+- 구현 기준: 현재 `backend` Controller, Request/Response DTO, 도메인 상태 전이와 통합 테스트
 
-이 문서는 현재 `frontend/` 구현이 기대하는 계약이다. `platformprd.md` 22장의 확정 결정을 반영해 점수는 정답자 1점만 계산하고, 게임 시작 후 신규 입장을 막으며, 방 데이터는 활성 게임과 재접속에 필요한 동안만 유지한다.
+이 문서는 현재 백엔드가 제공하는 계약을 정의한다. 제품 정책은 `platformprd.md`를 따르며, 충돌할 경우 PRD 22장의 확정 답변, MVP 수용 기준, P0 요구사항 순으로 우선한다.
 
-### 리소스 경계
+## 1. API 경계
 
-- `/rooms`는 게임 종류와 무관한 방 코드, 방 이름, 정원, 참가자 세션과 입장 가능 여부를 담당한다.
-- `/games/{game_type}`은 게임별 설정, 상태, 입력, 라운드, 투표, 점수와 진행 명령을 담당한다. TTF의 `game_type` path 값은 `ttf`, JSON 값은 `TTF`다.
-- `room_id`와 `game_id`는 서로 다른 식별자다. 클라이언트는 한 값을 다른 값으로 대신 사용하지 않는다.
-- MVP에서는 방 하나에 활성 게임 하나만 둔다. 방 생성 요청의 판별 가능한 `game` 객체로 방과 게임을 한 트랜잭션에서 생성하며, 지원 게임이 늘어나면 새 `game.type`과 `/games/{game_type}` 계약을 추가한다.
-- 참가 링크와 입장 API는 방을 가리키고, 입장 이후 플레이·진행·공용 화면은 응답으로 받은 `game.id`를 사용한다.
-- 기존 초안의 `/rooms/{room_id}/rounds/...`, `/rooms/{room_id}/snapshot`, `/rooms/{room_id}/events`는 v1 계약에서 제거한다. 백엔드는 두 체계를 동시에 제공하지 않고 프론트엔드와 함께 전환한다.
+- `/rooms`는 방 생성, 방 코드 조회, 참가, 참가자 내보내기와 방 취소를 담당한다.
+- `/games/ttf`는 TTF 게임 스냅샷, 참가자 입력, 진행자 명령과 실시간 이벤트를 담당한다.
+- `room_id`와 `game_id`는 서로 다른 불투명 식별자다.
+- 방 생성 시 방과 TTF 게임 하나를 함께 생성한다.
+- 참가 링크에는 방 코드만 포함하며 세션 토큰이나 진행자 권한을 포함하지 않는다.
+- 게임 시작 후 신규 참가는 허용하지 않으며 관전자 참가 API도 제공하지 않는다.
+- 계정, 게임 히스토리, 종료 게임 목록 API는 MVP 범위에 없다.
 
-## 1. 공통 규칙
+## 2. 공통 계약
 
-### 1.1 식별자와 시간
+### 2.1 식별자와 시간
 
-- `room_id`, `game_id`, `participant_id`, `round_id`, `statement_id`는 외부에서 추측하기 어려운 불투명 문자열이다. UUIDv4/UUIDv7 사용을 권장하지만 클라이언트는 UUID 형식에 의존하지 않는다.
-- 방 코드는 대문자 영문과 숫자로 구성된 6자리 문자열이다. 예: `A7K2Q9`.
-- 모든 시각은 UTC ISO 8601 문자열로 반환한다. 예: `2026-09-05T10:30:00.000Z`.
-- 비율은 `0`부터 `100` 사이 숫자이며 소수점 한 자리까지 허용한다.
-- 서버 스냅샷의 `version`은 게임마다 단조 증가하는 정수다. 게임 상태에 영향을 주는 쓰기가 커밋될 때 증가한다.
-- 참가·내보내기처럼 방 API에서 발생했지만 활성 게임 snapshot을 바꾸는 쓰기도 해당 게임 `version`을 증가시키고 게임 SSE에 알린다.
+- `room_id`, `game_id`, `participant_id`, `round_id`, `statement_id`는 의미를 해석할 수 없는 문자열로 취급한다.
+- 클라이언트는 UUID 형식이나 접두사 길이에 의존하지 않는다.
+- 방 코드는 대소문자를 구분하지 않는 영문·숫자 6자리다. 응답에는 생성된 대문자 코드를 반환한다.
+- 모든 시각은 UTC ISO 8601 문자열이다.
+- 게임 `version`은 상태가 변경될 때 증가하는 정수다.
+- SSE의 `id`는 스트림 재연결용 순번이며 게임 `version`과 별개다.
 
-### 1.2 세션과 쿠키
+### 2.2 성공 응답
 
-회원가입이나 사용자 계정은 없다. 방 생성과 참가 성공 시 백엔드가 추측 불가능한 세션 토큰을 쿠키로 발급한다.
+JSON 응답이 있는 API는 `ApiResponse<T>`로 반환한다.
+
+```json
+{
+  "success": true,
+  "data": {},
+  "response_time": "2026-09-06T12:34:56.789Z"
+}
+```
+
+| 상황 | HTTP status | body |
+|---|---:|---|
+| 리소스 생성 | `201 Created` | `ApiResponse<Response>` |
+| 조회 | `200 OK` | `ApiResponse<Response>` |
+| 명령 또는 수정 성공 | `204 No Content` | 없음 |
+| SSE 연결 | `200 OK` | `text/event-stream` |
+
+- Service는 API별 Response DTO를 생성한다.
+- Controller는 Response DTO를 `ApiResponse.success(...)`로 감싼다.
+- `204 No Content`와 SSE에는 `ApiResponse`를 사용하지 않는다.
+- 값이 `null`인 선택 필드는 JSON에서 생략된다.
+- `response_time`은 JSON envelope를 만든 시각이다.
+
+### 2.3 오류 응답
+
+오류는 `ApiResponse<Void>` 형식으로 반환하며 `data`는 생략한다.
+
+```json
+{
+  "success": false,
+  "error_code": "NICKNAME_TAKEN",
+  "message": "이미 사용 중인 닉네임이에요. 다른 이름을 입력해 주세요.",
+  "response_time": "2026-09-06T12:34:56.789Z"
+}
+```
+
+| HTTP | `error_code` | 의미 |
+|---:|---|---|
+| `400` | `VALIDATION_ERROR` | 필수값, 형식, 길이, enum 또는 `Idempotency-Key` 오류 |
+| `401` | `SESSION_REQUIRED` | 필요한 세션이 없거나 알 수 없는 세션 |
+| `403` | `HOST_PERMISSION_REQUIRED` | 대상 방의 진행자 권한이 없음 |
+| `403` | `PARTICIPANT_PERMISSION_REQUIRED` | 대상 방의 참가자 권한이 없음 |
+| `404` | `ROOM_NOT_FOUND` | 방을 찾을 수 없음 |
+| `404` | `GAME_NOT_FOUND` | TTF 게임을 찾을 수 없음 |
+| `404` | `ROUND_NOT_FOUND` | 현재 게임의 라운드를 찾을 수 없음 |
+| `409` | `INVALID_STATE_TRANSITION` | 현재 상태에서 허용되지 않는 동작 |
+| `409` | `NICKNAME_TAKEN` | 같은 방에 정규화 결과가 같은 닉네임이 존재함 |
+| `409` | `ROOM_FULL` | 방 정원 도달 |
+| `409` | `GAME_ALREADY_STARTED` | 게임 시작 후 참가 시도 |
+| `409` | `NOT_ENOUGH_PARTICIPANTS` | 게임 시작에 필요한 참가자 수 미달 |
+| `409` | `PARTICIPANTS_NOT_READY` | 문장 제출을 완료하지 않은 참가자가 존재함 |
+| `409` | `SPEAKER_CANNOT_VOTE` | 발표자가 자기 라운드에 투표함 |
+| `409` | `VOTING_NOT_OPEN` | 투표 전, 마감 후 또는 서버 마감 시각 이후 투표함 |
+| `409` | `IDEMPOTENCY_KEY_REUSED` | 같은 멱등성 키를 다른 body에 재사용함 |
+| `410` | `ROOM_EXPIRED` | 만료 또는 정리 대상 방에 접근함 |
+| `429` | `RATE_LIMITED` | 요청 또는 SSE 연결 제한 초과 |
+| `500` | `INTERNAL_ERROR` | 공개할 수 없는 서버 오류 |
+
+추가 HTTP 처리:
+
+- 지원하지 않는 HTTP method는 `405`와 `VALIDATION_ERROR`를 반환한다.
+- 신뢰할 수 없는 변경 요청 출처는 `403`과 `SESSION_REQUIRED`를 반환한다.
+- `429`에는 재시도 가능 시각을 초 단위로 나타내는 `Retry-After` 헤더가 포함된다.
+- 오류 메시지에는 원문 문장, 토큰, 내부 예외나 스택 트레이스를 포함하지 않는다.
+
+### 2.4 세션 쿠키와 권한
+
+방 생성과 참가 성공 시 각각 별도 세션 쿠키를 발급한다.
 
 ```http
 Set-Cookie: ttf_host_session=<opaque>; Path=/api/v1; HttpOnly; Secure; SameSite=Lax
 Set-Cookie: ttf_participant_session=<opaque>; Path=/api/v1; HttpOnly; Secure; SameSite=Lax
 ```
 
-- 토큰 원문을 데이터베이스, 로그, URL 또는 API 응답 body에 기록하지 않는다. 서버에는 검증 가능한 해시만 저장한다.
-- 로컬 HTTP 개발 환경에서는 `Secure`를 생략할 수 있지만 운영 환경에서는 필수다.
-- 프론트엔드는 모든 요청에 `credentials: include`를 사용한다.
-- 쿠키 하나가 여러 방의 권한을 가질 수 있도록 서버 세션에 방별 권한 목록을 둔다. `/rooms`에서 받은 자격 증명이 `/games`에도 전송되므로 모든 권한 검사는 대상 `room_id` 또는 게임이 속한 방까지 확인한다.
-- 진행자와 참가자 쿠키를 분리해 진행자가 새 탭으로 공용 화면을 열어도 권한이 섞이지 않게 한다.
-- `audience=display` 응답은 진행자 쿠키가 있어도 항상 공개용 필드만 반환한다.
-- 상태 변경 요청은 `Origin`/`Sec-Fetch-Site`를 검증해 CSRF를 방어한다. API와 프론트엔드 origin이 다르면 명시적인 credential 포함 CORS allowlist를 사용하고 와일드카드 origin을 허용하지 않는다.
+- 운영 기본값은 `Secure=true`다. 로컬 HTTP 환경에서는 설정으로 비활성화할 수 있다.
+- 세션 토큰은 URL과 JSON body에 포함하지 않는다.
+- 한 쿠키는 여러 방의 권한을 가질 수 있지만 권한 검사는 항상 대상 방까지 확인한다.
+- 참가자 쿠키로 진행자 API를 호출하면 `HOST_PERMISSION_REQUIRED`다.
+- 진행자 쿠키로 참가자 API를 호출하면 `PARTICIPANT_PERMISSION_REQUIRED`다.
+- 프론트엔드는 쿠키가 필요한 요청에 `credentials: include`를 사용한다.
 
-### 1.3 멱등성
+모든 `POST`, `PUT`, `DELETE` 요청은 신뢰 가능한 출처여야 한다.
 
-생성 및 명령 API는 `Idempotency-Key` 헤더를 받는다.
+- `Origin`이 설정된 경우 같은 origin 또는 서버 allowlist와 일치해야 한다.
+- `Origin`이 없으면 `Sec-Fetch-Site: same-origin`이어야 한다.
+- credential CORS 허용 method는 `GET`, `POST`, `PUT`, `DELETE`, `OPTIONS`다.
+- 허용 요청 헤더는 `Content-Type`, `Accept`, `Idempotency-Key`, `Last-Event-ID`다.
+
+### 2.5 멱등성
+
+다음 API는 `Idempotency-Key` 헤더가 필수다.
+
+- 방 생성과 참가
+- 참가자 내보내기와 방 취소
+- 모든 진행자 게임 명령
 
 ```http
 Idempotency-Key: 1fd98a11-1ea2-4755-b316-c2177f8ca128
 ```
 
-- 같은 세션, 같은 endpoint, 같은 key와 같은 body의 재요청은 최초 응답의 status와 body를 반환한다.
-- 같은 key에 다른 body가 오면 `409 IDEMPOTENCY_KEY_REUSED`를 반환한다.
-- 키는 최소한 활성 방이 유지되는 동안 기억한다.
-- `PUT` 투표와 문장 저장은 리소스 자체도 멱등적이어야 한다.
+- 키는 공백이 아닌 최대 200자 문자열이다.
+- 멱등성 범위는 `세션 + endpoint + key`다.
+- 같은 범위와 같은 body의 재요청은 상태 변경을 반복하지 않고 저장된 Response DTO 또는 명령 결과를 재사용한다.
+- 같은 키에 다른 body를 사용하면 `409 IDEMPOTENCY_KEY_REUSED`다.
+- 성공 JSON envelope는 Controller가 요청마다 새로 생성하므로 `data`는 같지만 `response_time`은 달라질 수 있다.
+- `204` 명령 재요청은 계속 `204`를 반환한다.
+- 문장 저장과 투표는 `PUT` 리소스 의미로 멱등 동작한다. 별도 `Idempotency-Key`는 받지 않는다.
+- 방이나 게임이 정리되면 관련 멱등성 기록도 제거한다.
 
-### 1.4 성공 응답
+### 2.6 캐시
 
-- 생성: `201 Created`
-- 조회: `200 OK`
-- body가 필요 없는 명령/수정: `204 No Content`
-- `204` 응답에는 JSON body를 넣지 않는다.
+- 방 코드 조회: `Cache-Control: no-store`
+- 게임 스냅샷: `Cache-Control: private, no-store`, `Vary: Cookie`
+- SSE: `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`
 
-### 1.5 오류 응답
+## 3. 상태와 공개 정책
 
-모든 오류는 다음 envelope를 사용한다.
-
-```json
-{
-  "error": {
-    "code": "NICKNAME_TAKEN",
-    "message": "이미 사용 중인 닉네임이에요. 다른 이름을 입력해 주세요.",
-    "field_errors": {
-      "nickname": "같은 방에서 닉네임은 중복될 수 없습니다."
-    },
-    "request_id": "req_01J7JQ4M8ZA8YH3YJ4KP6FC8VA"
-  }
-}
-```
-
-- `message`는 사용자에게 보여도 되는 간결한 한국어 문장이다.
-- `field_errors`는 선택 필드이며 key는 요청 body의 필드 경로다.
-- 내부 예외, SQL, 스택 트레이스, 원문 문장, 세션 토큰을 포함하지 않는다.
-
-| HTTP | 오류 코드 | 의미 |
-|---|---|---|
-| 400 | `VALIDATION_ERROR` | 형식, 길이 또는 필수 필드 오류 |
-| 401 | `SESSION_REQUIRED` | 필요한 세션 쿠키가 없음 |
-| 403 | `HOST_PERMISSION_REQUIRED` | 진행자 전용 API 호출 |
-| 403 | `PARTICIPANT_PERMISSION_REQUIRED` | 해당 방 참가자가 아님 |
-| 404 | `ROOM_NOT_FOUND` | 존재하지 않는 방 또는 임의 ID 탐색 방지 |
-| 404 | `GAME_NOT_FOUND` | 존재하지 않는 게임 또는 방과 연결되지 않은 게임 |
-| 404 | `ROUND_NOT_FOUND` | 방에 속하지 않는 라운드 |
-| 409 | `INVALID_STATE_TRANSITION` | 현재 상태에서 실행할 수 없는 명령 |
-| 409 | `NICKNAME_TAKEN` | 같은 방의 정규화된 닉네임 중복 |
-| 409 | `ROOM_FULL` | 최대 인원 도달 |
-| 409 | `GAME_ALREADY_STARTED` | 게임 시작 후 신규 입장 시도 |
-| 409 | `NOT_ENOUGH_PARTICIPANTS` | 준비된 참가자가 2명 미만 |
-| 409 | `PARTICIPANTS_NOT_READY` | 준비되지 않은 참가자가 존재함 |
-| 409 | `SPEAKER_CANNOT_VOTE` | 발표자의 자기 라운드 투표 |
-| 409 | `VOTING_NOT_OPEN` | 투표 전 또는 마감 후 요청 |
-| 409 | `IDEMPOTENCY_KEY_REUSED` | 같은 key를 다른 요청에 재사용 |
-| 410 | `ROOM_EXPIRED` | 취소·만료 후 정리된 방 |
-| 429 | `RATE_LIMITED` | 요청 횟수 제한 초과 |
-| 500 | `INTERNAL_ERROR` | 공개할 수 없는 서버 오류 |
-
-`429`에는 가능한 경우 `Retry-After` 헤더를 포함한다.
-
-## 2. 상태와 공개 정책
-
-방 상태와 TTF 게임 상태는 분리한다.
-
-- 방 상태: `OPEN -> IN_GAME -> CLOSED`, 수명 만료 시 `EXPIRED`.
-- `OPEN`에서만 입장할 수 있다. TTF 게임 시작 커밋과 함께 방을 `IN_GAME`으로 잠근다.
-- TTF 게임이 완료되거나 취소되면 방도 `CLOSED`가 된다. `EXPIRED`는 방 수명 주기 상태이며 게임 진행 상태로 사용하지 않는다.
-
-### 2.1 정상 상태 흐름
+### 3.1 방 상태
 
 ```text
-LOBBY
-  -> SUBMISSION
-  -> READY
-  -> ROUND_INTRO
-  -> VOTING
-  -> VOTE_CLOSED
-  -> RESULT
-  -> ROUND_INTRO (다음 발표자)
-  -> FINISHED
+OPEN -> IN_GAME -> CLOSED
+  \----------------> CLOSED
+OPEN 또는 IN_GAME -> EXPIRED
 ```
 
-- `LOBBY`: 방 생성 직후, 참가자가 아직 없음.
-- `SUBMISSION`: 참가자 입장 또는 문장 작성 중. 준비 상태가 바뀔 때 서버가 재평가한다.
-- `READY`: 2명 이상이고 현재 참가자가 모두 문장 제출을 완료함. 새 참가자가 들어오면 `SUBMISSION`으로 돌아갈 수 있다.
-- 게임 시작은 `READY`에서만 가능하며 준비된 참가자를 기준으로 라운드 순서를 고정한다.
-- `PAUSED`는 `ROUND_INTRO`, `VOTING`, `VOTE_CLOSED`, `RESULT`에서 진입할 수 있다. `paused_from_status`와 투표 잔여 시간을 보존한다.
-- `CANCELLED`: 시작 전 방 취소.
-- `FINISHED`: 전 라운드 완료 또는 진행자의 조기 종료.
+- `OPEN`: 참가와 시작 전 수정이 가능한 방
+- `IN_GAME`: 게임이 시작되어 참가가 잠긴 방
+- `CLOSED`: 취소 또는 게임 종료 후 정리 대기 중인 방
+- `EXPIRED`: 활성 TTL을 초과해 정리 대기 중인 방
 
-### 2.2 정답과 투표 정보
+### 3.2 TTF 게임 상태
 
-- `ROUND_INTRO`, `VOTING`, `VOTE_CLOSED`의 snapshot/API/SSE에는 `is_fake`, `fake_statement_id`, 문장별 득표 수, 투표자 목록을 절대 포함하지 않는다.
-- `RESULT` 이후에만 현재 라운드의 `result`를 포함한다.
-- 진행 중 `vote_progress`에는 완료 인원과 투표 가능 인원만 넣는다.
-- `anonymous_voting=true`이면 결과 공개 후에도 `voters` 필드를 생략한다.
-- 진행자 역시 정답 공개 전에는 정답 정보를 받지 않는다.
+```text
+LOBBY <-> SUBMISSION <-> READY
+READY -> ROUND_INTRO -> VOTING -> VOTE_CLOSED -> RESULT
+                    \                         /
+                     -> 다음 ROUND_INTRO 또는 FINISHED
+ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
+진행 중 상태 -> FINISHED
+시작 전 상태 -> CANCELLED
+```
 
-### 2.3 점수와 순위
+- `LOBBY`: 참가자가 없음
+- `SUBMISSION`: 참가자가 있으나 2명 미만이거나 전원이 준비되지 않음
+- `READY`: 참가자가 2명 이상이고 전원이 문장 제출 완료
+- `ROUND_INTRO`: 현재 발표자와 문장이 공개된 투표 전 단계
+- `VOTING`: 서버 마감 시각 전까지 투표 가능
+- `VOTE_CLOSED`: 투표 마감, 결과 공개 전
+- `RESULT`: 현재 라운드 정답과 점수 공개 완료
+- `PAUSED`: 이전 상태와 투표 잔여 시간을 보존한 일시 정지
+- `FINISHED`: 최종 순위 확정
+- `CANCELLED`: 시작 전 취소
 
-- 가짜 문장을 맞힌 투표자에게 라운드당 1점을 준다.
+### 3.3 비공개 정보
+
+- `ROUND_INTRO`, `VOTING`, `VOTE_CLOSED`에는 문장 진위, 정답 ID, 개별 투표자와 득표 결과를 공개하지 않는다.
+- 진행자도 결과 공개 전에는 정답 정보를 받지 않는다.
+- 참가자는 시작 전 자기 `my_statements`에서만 `is_fake`를 볼 수 있다.
+- 결과는 `RESULT` 이후 현재 라운드의 `result`로 공개한다.
+- `anonymous_voting=true`이면 결과 공개 후에도 `voters`를 생략한다.
+- SSE payload에는 원문 문장, 진위, 투표 대상 ID나 세션 정보를 넣지 않는다.
+
+### 3.4 점수와 순위
+
+- 가짜 문장을 고른 참가자에게 라운드당 1점을 준다.
 - 발표자 기만 점수와 무득표 보너스는 없다.
-- 점수는 결과 공개 시 한 번만 반영한다. 동일 명령 재시도로 중복 가산하지 않는다.
-- 동점은 공동 순위다. 다음 순위는 경쟁 순위 방식이다. 예: `1, 1, 3, 4, 4, 6`.
+- 점수는 결과 공개 명령에서 한 번만 반영한다.
+- 동점은 공동 순위이며 다음 순위는 경쟁 순위 방식이다. 예: `1, 1, 3`.
 
-## 3. 스키마
+## 4. Endpoint 요약
 
-### 3.1 `RoomSummary`
+### 4.1 방 API
+
+| Method | Path | 권한 | 필수 헤더 | 성공 |
+|---|---|---|---|---:|
+| `POST` | `/rooms` | 공개 | `Idempotency-Key` | `201` |
+| `GET` | `/rooms/by-code/{code}` | 공개 | - | `200` |
+| `POST` | `/rooms/{room_id}/participants` | 공개 | `Idempotency-Key` | `201` |
+| `DELETE` | `/rooms/{room_id}/participants/{participant_id}` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/rooms/{room_id}/commands/cancel` | 진행자 | `Idempotency-Key` | `204` |
+
+### 4.2 TTF API
+
+| Method | Path | 권한 | 필수 헤더 | 성공 |
+|---|---|---|---|---:|
+| `GET` | `/games/ttf/{game_id}/snapshot?audience=...` | audience별 | - | `200` |
+| `GET` | `/games/ttf/{game_id}/events?audience=...` | audience별 | `Accept: text/event-stream` 권장 | `200` |
+| `PUT` | `/games/ttf/{game_id}/participants/me/statements` | 참가자 | - | `204` |
+| `PUT` | `/games/ttf/{game_id}/rounds/{round_id}/vote` | 참가자 | - | `204` |
+| `POST` | `/games/ttf/{game_id}/commands/start` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/start-voting` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/extend-voting` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/close-voting` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/reveal-result` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/skip` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/commands/next-round` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/commands/pause` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/commands/resume` | 진행자 | `Idempotency-Key` | `204` |
+| `POST` | `/games/ttf/{game_id}/commands/finish` | 진행자 | `Idempotency-Key` | `204` |
+
+표의 모든 path 앞에는 `/api/v1`이 붙는다. 모든 변경 요청에는 2.4절의 출처 검증도 적용된다.
+
+## 5. 방 API
+
+### 5.1 방 생성
+
+`POST /api/v1/rooms`
+
+요청:
 
 ```json
 {
-  "id": "room_01J7J...",
-  "code": "A7K2Q9",
   "name": "마케팅팀 금요 워크숍",
-  "status": "OPEN",
-  "joinable": true,
-  "participant_count": 8,
   "settings": {
     "max_participants": 30
   },
-  "active_game": {
-    "id": "game_01J7J...",
-    "type": "TTF"
+  "game": {
+    "type": "TTF",
+    "settings": {
+      "statement_max_length": 100,
+      "voting_duration_seconds": 60,
+      "speaker_order": "RANDOM",
+      "anonymous_voting": true
+    }
   }
 }
 ```
 
-`RoomSummary.status`는 방 수명 주기만 나타낸다. 화면의 게임 단계는 게임 snapshot의 `game.status`를 사용한다. `active_game.type`을 모르는 클라이언트는 임의의 게임 API를 호출하지 않고 지원하지 않는 게임으로 처리한다.
+검증:
 
-### 3.2 `TtfGameSnapshot`
+- `name`: 공백이 아닌 최대 40자
+- `max_participants`: `2..100`
+- `game.type`: `TTF`
+- `statement_max_length`: `20..200`
+- `voting_duration_seconds`: `15..180`
+- `speaker_order`: `RANDOM` 또는 `JOIN_ORDER`
+- `anonymous_voting`: boolean
+- 문장 최소 길이는 MVP에서 5자로 고정
+
+응답: `201 Created`, 진행자 쿠키 발급
 
 ```json
 {
-  "version": 17,
-  "server_time": "2026-09-05T10:30:00.000Z",
-  "room": {
+  "success": true,
+  "data": {
+    "room": {
+      "id": "room_01J7J...",
+      "code": "A7K2Q9",
+      "join_url": "https://ttf.example/join/A7K2Q9"
+    },
+    "game": {
+      "id": "game_01J7J...",
+      "type": "TTF"
+    }
+  },
+  "response_time": "2026-09-06T12:34:56.789Z"
+}
+```
+
+### 5.2 방 코드 조회
+
+`GET /api/v1/rooms/by-code/{code}`
+
+- `{code}`는 영문·숫자 6자리여야 한다.
+- 형식이 잘못되거나 존재하지 않으면 정보 탐색을 막기 위해 `404 ROOM_NOT_FOUND`다.
+- 시작 또는 종료된 방도 정리 전까지 조회될 수 있으며 이때 `joinable=false`다.
+
+응답: `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
     "id": "room_01J7J...",
     "code": "A7K2Q9",
     "name": "마케팅팀 금요 워크숍",
-    "status": "IN_GAME",
-    "joinable": false,
-    "participant_count": 8,
+    "status": "OPEN",
+    "joinable": true,
+    "participant_count": 3,
     "settings": {
       "max_participants": 30
     },
@@ -201,282 +319,55 @@ LOBBY
       "type": "TTF"
     }
   },
-  "game": {
-    "id": "game_01J7J...",
-    "type": "TTF",
-    "status": "VOTING",
-    "ready_count": 8,
-    "round_count": 8,
-    "current_round_number": 2,
-    "settings": {
-      "statement_min_length": 5,
-      "statement_max_length": 100,
-      "voting_duration_seconds": 60,
-      "speaker_order": "RANDOM",
-      "anonymous_voting": true
-    }
-  },
-  "viewer": {
-    "role": "PARTICIPANT",
-    "participant_id": "participant_02",
-    "nickname": "민준",
-    "is_ready": true
-  },
-  "current_round": {
-    "id": "round_02",
-    "number": 2,
-    "total": 8,
-    "speaker": {
-      "id": "participant_04",
-      "nickname": "수빈"
-    },
-    "statements": [
-      { "id": "statement_07", "content": "나는 사막에서 밤을 보낸 적이 있다.", "display_order": 1 },
-      { "id": "statement_09", "content": "나는 한 번도 커피를 마신 적이 없다.", "display_order": 2 },
-      { "id": "statement_08", "content": "나는 세 개의 악기를 연주할 수 있다.", "display_order": 3 }
-    ],
-    "voting_started_at": "2026-09-05T10:29:20.000Z",
-    "voting_ends_at": "2026-09-05T10:30:20.000Z",
-    "vote_progress": { "completed": 5, "eligible": 7 },
-    "my_vote_statement_id": "statement_09"
-  }
+  "response_time": "2026-09-06T12:34:56.789Z"
 }
 ```
 
-`room.active_game.id`와 `game.id`는 같아야 하며, `game`이 속한 방이 아닌 경우 서버는 `404 GAME_NOT_FOUND`로 응답한다.
-
-필드 공개 범위:
-
-| 필드 | `participant` | `host` | `display` |
-|---|---:|---:|---:|
-| 기본 방/TTF 게임/라운드 정보 | O | O | O |
-| `viewer.participant_id`, `my_vote_statement_id` | O | - | - |
-| 시작 전 본인 `my_statements` | O | - | - |
-| `participants` 목록과 준비/연결 상태 | - | O | - |
-| 공개 전 문장 진위 | - | - | - |
-| `result` (`RESULT` 이후) | O | O | O |
-| `voters` (`anonymous_voting=false`, 공개 이후) | O | O | O |
-| `leaderboard` (`FINISHED`) | O | O | O |
-
-`host` snapshot의 `participants` 항목:
-
-```json
-{
-  "id": "participant_02",
-  "nickname": "민준",
-  "connection_status": "ONLINE",
-  "is_ready": true,
-  "score": 1,
-  "is_current_speaker": false
-}
-```
-
-게임 시작 전 participant audience에는 본인이 작성한 문장을 수정할 수 있도록 최상위 `my_statements`를 포함한다. 이 필드는 본인에게만 반환한다.
-
-```json
-{
-  "my_statements": [
-    { "id": "statement_01", "content": "나는 사막에서 밤을 보낸 적이 있다.", "is_fake": false },
-    { "id": "statement_02", "content": "나는 커피를 한 번도 마신 적이 없다.", "is_fake": true },
-    { "id": "statement_03", "content": "나는 세 개의 악기를 연주할 수 있다.", "is_fake": false }
-  ]
-}
-```
-
-`is_fake`가 공개되는 유일한 사전 공개 예외는 인증된 참가자 본인의 `my_statements`다. host/display/다른 participant 응답에는 포함하지 않는다.
-
-`RESULT` 이후 `current_round.result`:
-
-```json
-{
-  "fake_statement_id": "statement_09",
-  "statements": [
-    {
-      "id": "statement_07",
-      "content": "나는 사막에서 밤을 보낸 적이 있다.",
-      "display_order": 1,
-      "is_fake": false,
-      "vote_count": 1,
-      "vote_rate": 14.3
-    },
-    {
-      "id": "statement_09",
-      "content": "나는 한 번도 커피를 마신 적이 없다.",
-      "display_order": 2,
-      "is_fake": true,
-      "vote_count": 5,
-      "vote_rate": 71.4
-    },
-    {
-      "id": "statement_08",
-      "content": "나는 세 개의 악기를 연주할 수 있다.",
-      "display_order": 3,
-      "is_fake": false,
-      "vote_count": 1,
-      "vote_rate": 14.3
-    }
-  ],
-  "correct_voter_count": 5,
-  "fooled_participant_count": 2,
-  "score_changes": [
-    { "participant_id": "participant_02", "nickname": "민준", "delta": 1, "total": 2 }
-  ]
-}
-```
-
-익명 투표가 꺼진 방에서는 각 statement result에 다음 선택 필드를 추가할 수 있다.
-
-```json
-"voters": [{ "id": "participant_02", "nickname": "민준" }]
-```
-
-`FINISHED`의 `leaderboard` 항목:
-
-```json
-{
-  "participant_id": "participant_02",
-  "nickname": "민준",
-  "score": 5,
-  "rank": 1,
-  "is_me": true
-}
-```
-
-`is_me`는 participant audience에서만 해당 참가자에게 `true`이며 host/display에서는 모두 `false`다.
-
-## 4. Endpoint 요약
-
-### 4.1 범용 방 API
-
-| Method | Path | 권한 | 설명 |
-|---|---|---|---|
-| `POST` | `/rooms` | 공개 | 방과 선택한 게임을 원자적으로 생성하고 진행자 세션 발급 |
-| `GET` | `/rooms/by-code/{code}` | 공개 | 입장 전 방 정보 조회 |
-| `POST` | `/rooms/{room_id}/participants` | 공개 | 닉네임으로 참가 및 세션 발급 |
-| `DELETE` | `/rooms/{room_id}/participants/{participant_id}` | 진행자 | 시작 전 참가자 내보내기 |
-| `POST` | `/rooms/{room_id}/commands/cancel` | 진행자 | 시작 전 방과 활성 게임 취소 |
-
-### 4.2 TTF 게임 API
-
-| Method | Path | 권한 | 설명 |
-|---|---|---|---|
-| `GET` | `/games/ttf/{game_id}/snapshot` | 역할별 | 현재 TTF 전체 상태 복구 |
-| `PUT` | `/games/ttf/{game_id}/participants/me/statements` | 참가자 | 문장 3개 생성/전체 교체 |
-| `PUT` | `/games/ttf/{game_id}/rounds/{round_id}/vote` | 참가자 | 투표 등록/변경 |
-| `GET` | `/games/ttf/{game_id}/events` | 역할별 | SSE 상태 변경 알림 |
-| `POST` | `/games/ttf/{game_id}/commands/start` | 진행자 | 게임 시작 |
-| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/start-voting` | 진행자 | 투표 시작 |
-| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/extend-voting` | 진행자 | 투표 시간 연장 |
-| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/close-voting` | 진행자 | 투표 조기 마감 |
-| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/reveal-result` | 진행자 | 정답 및 점수 공개 |
-| `POST` | `/games/ttf/{game_id}/rounds/{round_id}/commands/skip` | 진행자 | 현재 라운드 건너뛰기 |
-| `POST` | `/games/ttf/{game_id}/commands/next-round` | 진행자 | 다음 라운드 또는 최종 결과 이동 |
-| `POST` | `/games/ttf/{game_id}/commands/pause` | 진행자 | 게임 일시 정지 |
-| `POST` | `/games/ttf/{game_id}/commands/resume` | 진행자 | 게임 재개 |
-| `POST` | `/games/ttf/{game_id}/commands/finish` | 진행자 | 진행 중 게임 조기 종료 |
-
-## 5. 방 및 참가 API
-
-### 5.1 게임방 생성
-
-`POST /api/v1/rooms`
-
-```json
-{
-  "name": "마케팅팀 금요 워크숍",
-  "settings": {
-    "max_participants": 30
-  },
-  "game": {
-    "type": "TTF",
-    "settings": {
-      "statement_max_length": 100,
-      "voting_duration_seconds": 60,
-      "speaker_order": "RANDOM",
-      "anonymous_voting": true
-    }
-  }
-}
-```
-
-검증:
-
-- `name`: trim 후 1~40자
-- `settings.max_participants`: 정수 2~100
-- `game.type`: 현재는 `TTF`만 지원한다. 지원하지 않는 값은 `400 VALIDATION_ERROR`로 거절한다.
-- `game.settings.statement_max_length`: 정수 20~200. 최소 길이는 MVP에서 5자로 고정
-- `game.settings.voting_duration_seconds`: 정수 15~180
-- `game.settings.speaker_order`: `RANDOM` 또는 `JOIN_ORDER`
-- `game.settings.anonymous_voting`: boolean
-
-응답 `201 Created`와 진행자 쿠키:
-
-```json
-{
-  "room": {
-    "id": "room_01J7J...",
-    "code": "A7K2Q9",
-    "join_url": "https://ttf.example/join/A7K2Q9"
-  },
-  "game": {
-    "id": "game_01J7J...",
-    "type": "TTF"
-  }
-}
-```
-
-방과 게임은 함께 성공하거나 함께 실패한다. `join_url`에는 방 코드만 포함하고 서명 토큰이나 진행자 권한 정보를 넣지 않는다.
-
-### 5.2 방 코드 조회
-
-`GET /api/v1/rooms/by-code/{code}`
-
-- 대소문자를 구분하지 않고 조회하되 응답 코드는 대문자로 정규화한다.
-- 응답: `200 RoomSummary`
-- 존재하지 않음: `404 ROOM_NOT_FOUND`
-- 만료됨: `410 ROOM_EXPIRED`
-- 시작 이후에는 방 정보를 반환하되 `joinable=false`다.
-
-### 5.3 게임 참가
+### 5.3 방 참가
 
 `POST /api/v1/rooms/{room_id}/participants`
 
-```json
-{ "nickname": "민준" }
-```
-
-검증:
-
-- 닉네임은 trim 후 1~20자다.
-- 비교용 닉네임은 앞뒤 공백 제거, 연속 공백 축약, Unicode 정규화, locale에 안전한 case folding을 적용한다.
-- 같은 방에서 정규화된 닉네임은 유일하다.
-- 방 정원 확인과 닉네임 선점은 원자적으로 처리한다.
-- 방이 `OPEN`이고 활성 TTF 게임이 `LOBBY`, `SUBMISSION`, `READY`일 때만 참가할 수 있다. 게임 시작 후에는 관전자 입장으로 전환하지 않고 거절한다.
-
-응답 `201 Created`와 참가자 쿠키:
+요청:
 
 ```json
 {
-  "room_id": "room_01J7J...",
-  "participant_id": "participant_02",
-  "game": {
-    "id": "game_01J7J...",
-    "type": "TTF"
-  }
+  "nickname": "민준"
 }
 ```
 
-같은 브라우저의 유효한 참가 세션으로 동일 요청을 재전송하면 기존 참가자를 복구하고 같은 응답을 반환한다.
+- `nickname`: 공백이 아닌 최대 20자
+- 비교 시 Unicode 정규화, 대소문자 정규화, 앞뒤·연속 공백 정규화를 적용한다.
+- 같은 방에서 정규화된 닉네임은 중복될 수 없다.
+- 정원 확인과 닉네임 등록은 원자적으로 처리한다.
+- 방이 `OPEN`이고 게임이 `LOBBY`, `SUBMISSION`, `READY`일 때만 참가할 수 있다.
+- 기존 참가 세션으로 동일한 닉네임에 재접속하면 같은 참가자 권한을 복구한다.
+
+응답: `201 Created`, 참가자 쿠키 발급
+
+```json
+{
+  "success": true,
+  "data": {
+    "room_id": "room_01J7J...",
+    "participant_id": "participant_02",
+    "game": {
+      "id": "game_01J7J...",
+      "type": "TTF"
+    }
+  },
+  "response_time": "2026-09-06T12:34:56.789Z"
+}
+```
 
 ### 5.4 참가자 내보내기
 
 `DELETE /api/v1/rooms/{room_id}/participants/{participant_id}`
 
-- 해당 방의 진행자 쿠키와 `Idempotency-Key`가 필요하다.
-- 방이 `OPEN`이고 활성 TTF 게임이 `LOBBY`, `SUBMISSION`, `READY`일 때만 허용한다.
-- 참가자, 해당 게임의 제출 문장, 참가 권한을 제거하고 인원/준비 상태를 재평가한다.
-- 이미 제거된 참가자에게 같은 요청을 반복하면 `204 No Content`를 반환한다.
-- 게임 시작 후에는 발표 순서와 집계를 보호하기 위해 `409 INVALID_STATE_TRANSITION`으로 거절한다.
+- 진행자 쿠키와 `Idempotency-Key`가 필요하다.
+- 게임 시작 전만 허용한다.
+- 참가자, TTF player, 제출 문장과 참가 세션 권한을 함께 제거한다.
+- 준비 상태와 게임 상태를 다시 계산한다.
+- 이미 제거된 참가자에 대한 동일 요청은 `204`로 처리한다.
 
 응답: `204 No Content`
 
@@ -484,270 +375,402 @@ LOBBY
 
 `POST /api/v1/rooms/{room_id}/commands/cancel`
 
-- 해당 방의 진행자 쿠키와 `Idempotency-Key`가 필요하다.
-- 방이 `OPEN`이고 활성 TTF 게임이 `LOBBY`, `SUBMISSION`, `READY`일 때만 허용한다.
-- 방은 `CLOSED`, TTF 게임은 `CANCELLED`로 같은 트랜잭션에서 전환하고 연결된 클라이언트에 알린 뒤 정리 정책을 시작한다.
+- 진행자 쿠키와 `Idempotency-Key`가 필요하다.
+- `OPEN` 방의 시작 전 게임만 취소할 수 있다.
+- 방은 `CLOSED`, 게임은 `CANCELLED`가 되고 종료 정리를 예약한다.
 
 응답: `204 No Content`
 
-## 6. TTF 게임 API
+## 6. TTF 스냅샷
 
-아래 endpoint는 반드시 `game.type=TTF`인 `game_id`를 받는다. 다른 유형이나 존재하지 않는 게임은 `404 GAME_NOT_FOUND`로 처리해 게임별 내부 계약이 섞이지 않게 한다.
-
-### 6.1 상태 snapshot
+### 6.1 조회
 
 `GET /api/v1/games/ttf/{game_id}/snapshot?audience={audience}`
 
-`audience`:
+| `audience` | 인증 | 용도 |
+|---|---|---|
+| `participant` | 해당 방 참가자 쿠키 | 개인 플레이 화면 |
+| `host` | 해당 방 진행자 쿠키 | 진행 화면과 참가자 관리 |
+| `display` | 불필요 | 공개 화면 |
 
-- `participant`: 게임이 속한 방의 참가자 쿠키 필수
-- `host`: 게임이 속한 방의 진행자 쿠키 필수
-- `display`: 쿠키 불필요, 항상 공개용 응답
+- `audience`는 대소문자를 구분하지 않는다.
+- `display`는 진행자 쿠키가 함께 전송돼도 공개 범위만 반환한다.
+- 조회 시 투표 마감 시각이 지났다면 서버가 먼저 `VOTE_CLOSED`를 반영한다.
+- 새로고침, 최초 접속, SSE 재연결과 이벤트 누락 복구는 이 API를 사용한다.
 
-응답: `200 TtfGameSnapshot`
+응답: `200 ApiResponse<TtfGameSnapshotResponse>`
 
-- 새로고침, 첫 연결, SSE 재연결, 이벤트 누락 시 이 endpoint 하나로 현재 화면을 완전히 복구할 수 있어야 한다.
-- `server_time`과 `voting_ends_at`을 함께 반환해 클라이언트가 남은 시간을 표시할 수 있게 한다. 최종 마감 판정은 항상 서버가 한다.
-- `PAUSED`에서는 `game.paused_from_status`와 현재 라운드를 포함하며 `voting_ends_at`은 재개 후 갱신한다.
+### 6.2 스냅샷 예시
 
-### 6.2 문장 저장/수정
-
-`PUT /api/v1/games/ttf/{game_id}/participants/me/statements`
+아래는 `participant`가 `VOTING` 상태를 조회한 예시다.
 
 ```json
 {
+  "success": true,
+  "data": {
+    "version": 17,
+    "server_time": "2026-09-06T12:34:56.789Z",
+    "room": {
+      "id": "room_01J7J...",
+      "code": "A7K2Q9",
+      "name": "마케팅팀 금요 워크숍",
+      "status": "IN_GAME",
+      "joinable": false,
+      "participant_count": 3,
+      "settings": {
+        "max_participants": 30
+      },
+      "active_game": {
+        "id": "game_01J7J...",
+        "type": "TTF"
+      }
+    },
+    "game": {
+      "id": "game_01J7J...",
+      "type": "TTF",
+      "status": "VOTING",
+      "ready_count": 3,
+      "round_count": 3,
+      "current_round_number": 1,
+      "settings": {
+        "statement_min_length": 5,
+        "statement_max_length": 100,
+        "voting_duration_seconds": 60,
+        "speaker_order": "RANDOM",
+        "anonymous_voting": true
+      }
+    },
+    "viewer": {
+      "role": "PARTICIPANT",
+      "participant_id": "participant_02",
+      "nickname": "민준",
+      "is_ready": true
+    },
+    "current_round": {
+      "id": "round_01",
+      "number": 1,
+      "total": 3,
+      "speaker": {
+        "id": "participant_01",
+        "nickname": "지수"
+      },
+      "statements": [
+        {
+          "id": "statement_01",
+          "content": "나는 사막에서 밤을 보낸 적이 있다.",
+          "display_order": 1
+        },
+        {
+          "id": "statement_02",
+          "content": "나는 커피를 한 번도 마신 적이 없다.",
+          "display_order": 2
+        },
+        {
+          "id": "statement_03",
+          "content": "나는 세 개의 악기를 연주할 수 있다.",
+          "display_order": 3
+        }
+      ],
+      "voting_started_at": "2026-09-06T12:34:00Z",
+      "voting_ends_at": "2026-09-06T12:35:00Z",
+      "vote_progress": {
+        "completed": 1,
+        "eligible": 2
+      },
+      "my_vote_statement_id": "statement_02"
+    }
+  },
+  "response_time": "2026-09-06T12:34:56.790Z"
+}
+```
+
+### 6.3 audience별 필드
+
+| 필드 | participant | host | display |
+|---|:---:|:---:|:---:|
+| `room`, `game`, `current_round` | O | O | O |
+| `viewer.role` | O | O | O |
+| `viewer.participant_id`, `nickname`, `is_ready` | O | - | - |
+| 시작 전 `my_statements` | O | - | - |
+| `current_round.my_vote_statement_id` | O | - | - |
+| `participants` | - | O | - |
+| 공개된 `current_round.result` | O | O | O |
+| `leaderboard` | O | O | O |
+
+- `my_statements`는 `LOBBY`, `SUBMISSION`, `READY`에서만 포함한다.
+- `participants`에는 `id`, `nickname`, `connection_status`, `is_ready`, `score`, `is_current_speaker`가 포함된다.
+- `leaderboard`는 `FINISHED`에서만 포함한다.
+- `leaderboard[].is_me`는 participant 본인만 `true`이고 host/display에서는 모두 `false`다.
+- `game.paused_from_status`는 `PAUSED`에서만 포함한다.
+
+### 6.4 결과 구조
+
+`RESULT` 이후 `current_round.result`:
+
+```json
+{
+  "fake_statement_id": "statement_02",
   "statements": [
-    { "content": "나는 사막에서 밤을 보낸 적이 있다.", "is_fake": false },
-    { "content": "나는 커피를 한 번도 마신 적이 없다.", "is_fake": true },
-    { "content": "나는 세 개의 악기를 연주할 수 있다.", "is_fake": false }
+    {
+      "id": "statement_01",
+      "content": "나는 사막에서 밤을 보낸 적이 있다.",
+      "display_order": 1,
+      "is_fake": false,
+      "vote_count": 0,
+      "vote_rate": 0.0
+    },
+    {
+      "id": "statement_02",
+      "content": "나는 커피를 한 번도 마신 적이 없다.",
+      "display_order": 2,
+      "is_fake": true,
+      "vote_count": 2,
+      "vote_rate": 100.0
+    }
+  ],
+  "correct_voter_count": 2,
+  "fooled_participant_count": 0,
+  "score_changes": [
+    {
+      "participant_id": "participant_02",
+      "nickname": "민준",
+      "delta": 1,
+      "total": 2
+    }
   ]
 }
 ```
 
-검증:
-
-- 정확히 3개이며 `is_fake=true`가 정확히 1개다.
-- 각 `content`는 trim 후 TTF 게임 설정의 최소~최대 길이를 만족해야 한다.
-- 연속 공백 축약 및 Unicode 정규화 후 동일한 문장을 중복 제출할 수 없다.
-- 원문은 자동 필터링하거나 진위를 판정하지 않는다.
-- 게임 시작 전 `LOBBY`, `SUBMISSION`, `READY`에서만 전체 교체할 수 있다.
-- 성공 시 참가자의 `is_ready=true`로 만들고 TTF 게임 상태를 재평가한다.
-- 공개 순서는 이 요청의 배열 순서와 무관하게 서버에서 한 번 무작위화한다.
-
-응답: `204 No Content`
-
-### 6.3 투표 등록/변경
-
-`PUT /api/v1/games/ttf/{game_id}/rounds/{round_id}/vote`
+`anonymous_voting=false`이면 각 statement 결과에 다음 필드가 추가된다.
 
 ```json
-{ "statement_id": "statement_09" }
+{
+  "voters": [
+    {
+      "id": "participant_02",
+      "nickname": "민준"
+    }
+  ]
+}
 ```
 
-- 참가자 세션에서 voter를 결정하며 body로 participant ID를 받지 않는다.
-- 현재 게임/라운드가 `VOTING`이고 서버 시간이 `voting_ends_at` 전일 때만 성공한다.
-- statement는 현재 라운드에 속해야 한다.
-- 발표자는 투표할 수 없다.
-- `(round_id, voter_participant_id)`를 유일하게 유지하며 기존 표가 있으면 새 statement로 변경한다.
-- 같은 statement에 대한 반복 `PUT`은 성공하되 표 수를 늘리지 않는다.
+## 7. 참가자 TTF API
 
-응답: `204 No Content`
+### 7.1 문장 저장 또는 전체 교체
 
-마감과 요청이 경합한 경우 서버 트랜잭션에서 마감이 먼저 확정되었다면 `409 VOTING_NOT_OPEN`을 반환한다. 프론트엔드는 이 응답을 받으면 투표가 저장되었다고 표시하지 않는다.
-
-## 7. TTF 진행자 명령 API
-
-모든 endpoint는 게임이 속한 방의 진행자 쿠키와 `Idempotency-Key`를 요구한다. 성공 응답은 모두 `204 No Content`이며 이후 snapshot 또는 SSE로 새 상태를 확인한다.
-
-### 7.1 게임 시작
-
-`POST /api/v1/games/ttf/{game_id}/commands/start`
-
-- 허용 상태: `READY`
-- 현재 참가자 2명 이상, 전원 문장 제출 완료 필요
-- 설정에 따라 발표 순서를 한 번 정하고 첫 라운드를 `ROUND_INTRO`로 만든다.
-- 게임을 `ROUND_INTRO`로 바꾸는 것과 방을 `IN_GAME`으로 잠그는 것을 같은 트랜잭션에서 처리한다.
-- 시작 커밋 이후 모든 신규 참가 요청은 `GAME_ALREADY_STARTED`로 거절한다.
-
-### 7.2 투표 시작
-
-`POST /api/v1/games/ttf/{game_id}/rounds/{round_id}/commands/start-voting`
-
-- 허용 상태: `ROUND_INTRO`
-- `voting_started_at=server_now`
-- `voting_ends_at=server_now + voting_duration_seconds`
-- 자동 마감 작업을 예약한다. 여러 서버 인스턴스가 실행해도 한 번만 `VOTE_CLOSED`로 전환되어야 한다.
-
-### 7.3 투표 시간 연장
-
-`POST /api/v1/games/ttf/{game_id}/rounds/{round_id}/commands/extend-voting`
-
-```json
-{ "seconds": 15 }
-```
-
-- 허용 상태: `VOTING`
-- `seconds`: 정수 5~60
-- 현재 `voting_ends_at`에 더한다. 기존 자동 마감 작업은 새 시각을 존중해야 한다.
-
-### 7.4 투표 조기 마감
-
-`POST /api/v1/games/ttf/{game_id}/rounds/{round_id}/commands/close-voting`
-
-- 허용 상태: `VOTING`
-- 성공 커밋 시점부터 추가 투표를 받지 않는다.
-- 자동 마감과 경합해도 한 번만 `VOTE_CLOSED`로 전환한다.
-
-### 7.5 정답 공개
-
-`POST /api/v1/games/ttf/{game_id}/rounds/{round_id}/commands/reveal-result`
-
-- 허용 상태: `VOTE_CLOSED`
-- 결과 집계와 정답자 점수 반영을 하나의 원자적 작업으로 수행한다.
-- 같은 명령을 반복해도 점수가 중복 반영되지 않는다.
-- 커밋 후 상태는 `RESULT`다.
-
-### 7.6 라운드 건너뛰기
-
-`POST /api/v1/games/ttf/{game_id}/rounds/{round_id}/commands/skip`
-
-- 허용 상태: `ROUND_INTRO`
-- 해당 라운드는 점수 변화 없이 skipped로 기록하고 다음 라운드를 `ROUND_INTRO`로 연다.
-- 마지막 라운드였다면 게임을 `FINISHED`, 방을 `CLOSED`로 전환한다.
-
-### 7.7 다음 라운드
-
-`POST /api/v1/games/ttf/{game_id}/commands/next-round`
-
-- 허용 상태: `RESULT`
-- 다음 발표자가 있으면 다음 라운드를 `ROUND_INTRO`로 연다.
-- 마지막 라운드였다면 최종 leaderboard를 확정하고 게임을 `FINISHED`, 방을 `CLOSED`로 전환한다.
-
-### 7.8 일시 정지/재개
-
-`POST /api/v1/games/ttf/{game_id}/commands/pause`
-
-- 허용 상태: `ROUND_INTRO`, `VOTING`, `VOTE_CLOSED`, `RESULT`
-- 이전 상태를 `paused_from_status`로 기록한다.
-- `VOTING` 중이면 서버 기준 남은 시간을 저장하고 자동 마감을 무효화한다.
-
-`POST /api/v1/games/ttf/{game_id}/commands/resume`
-
-- 허용 상태: `PAUSED`
-- 이전 상태로 돌아간다.
-- 투표 중이었다면 `voting_ends_at=server_now + 저장된 남은 시간`으로 다시 설정하고 자동 마감을 예약한다.
-
-### 7.9 조기 종료
-
-`POST /api/v1/games/ttf/{game_id}/commands/finish`
-
-- 허용 상태: `ROUND_INTRO`, `VOTING`, `VOTE_CLOSED`, `RESULT`, `PAUSED`
-- 아직 공개하지 않은 현재 라운드에는 점수를 반영하지 않는다.
-- 완료된 라운드의 누적 점수로 leaderboard를 계산하고 게임을 `FINISHED`, 방을 `CLOSED`로 전환한다.
-
-## 8. TTF SSE 실시간 이벤트
-
-### 8.1 연결
-
-`GET /api/v1/games/ttf/{game_id}/events?audience={audience}`
+`PUT /api/v1/games/ttf/{game_id}/participants/me/statements`
 
 요청:
 
-```http
-Accept: text/event-stream
-Cache-Control: no-cache
+```json
+{
+  "statements": [
+    {
+      "content": "나는 사막에서 밤을 보낸 적이 있다.",
+      "is_fake": false
+    },
+    {
+      "content": "나는 커피를 한 번도 마신 적이 없다.",
+      "is_fake": true
+    },
+    {
+      "content": "나는 세 개의 악기를 연주할 수 있다.",
+      "is_fake": false
+    }
+  ]
+}
 ```
 
-인증과 공개 범위는 snapshot의 audience 규칙과 동일하다. 응답 헤더 예시:
+- 해당 방의 참가자 쿠키가 필요하다.
+- 문장은 정확히 3개여야 한다.
+- `is_fake=true`는 정확히 1개여야 한다.
+- 공백 정리 후 각 문장은 설정된 `statement_min_length..statement_max_length`를 만족해야 한다.
+- Unicode와 공백 정규화 후 같은 내용은 중복할 수 없다.
+- `LOBBY`, `SUBMISSION`, `READY`에서만 저장할 수 있다.
+- 저장 성공 시 참가자를 준비 완료로 표시하고 전체 준비 상태를 다시 계산한다.
+- 배열 순서와 실제 공개 순서는 무관하며 공개 순서는 서버가 결정한다.
+- 자동 금칙어 필터를 적용하지 않는다.
+
+응답: `204 No Content`
+
+### 7.2 투표 등록 또는 변경
+
+`PUT /api/v1/games/ttf/{game_id}/rounds/{round_id}/vote`
+
+요청:
+
+```json
+{
+  "statement_id": "statement_02"
+}
+```
+
+- 해당 방의 참가자 쿠키가 필요하다.
+- voter는 세션에서 결정하며 body로 받지 않는다.
+- 현재 라운드가 `VOTING`이고 서버 시각이 `voting_ends_at` 전이어야 한다.
+- statement는 현재 라운드에 속해야 한다.
+- 발표자는 투표할 수 없다.
+- 참가자 한 명은 라운드당 한 표만 가지며 다시 요청하면 선택 statement를 변경한다.
+- 같은 statement를 다시 선택해도 표 수와 version을 증가시키지 않는다.
+- 마감과 경합하면 서버에서 마감을 먼저 반영하고 `409 VOTING_NOT_OPEN`을 반환할 수 있다.
+
+응답: `204 No Content`
+
+## 8. 진행자 명령 API
+
+모든 진행자 명령은 해당 방의 진행자 쿠키와 `Idempotency-Key`를 요구하며 성공 시 `204 No Content`를 반환한다.
+
+| 명령 | 허용 상태 | 처리 결과 |
+|---|---|---|
+| `POST /games/ttf/{game_id}/commands/start` | `READY` | 발표 순서를 확정하고 첫 라운드를 `ROUND_INTRO`, 방을 `IN_GAME`으로 전환 |
+| `POST /games/ttf/{game_id}/rounds/{round_id}/commands/start-voting` | `ROUND_INTRO` | 투표 시작·마감 시각을 기록하고 자동 마감 예약 |
+| `POST /games/ttf/{game_id}/rounds/{round_id}/commands/extend-voting` | 마감 전 `VOTING` | 기존 마감 시각에 요청 초를 더하고 자동 마감 재예약 |
+| `POST /games/ttf/{game_id}/rounds/{round_id}/commands/close-voting` | `VOTING` | 즉시 `VOTE_CLOSED`로 전환하고 자동 마감 취소 |
+| `POST /games/ttf/{game_id}/rounds/{round_id}/commands/reveal-result` | `VOTE_CLOSED` | 결과 집계, 정답자 1점 반영 후 `RESULT`로 전환 |
+| `POST /games/ttf/{game_id}/rounds/{round_id}/commands/skip` | `ROUND_INTRO` | 점수 없이 현재 라운드를 건너뛰고 다음 라운드 또는 종료 |
+| `POST /games/ttf/{game_id}/commands/next-round` | `RESULT` | 다음 라운드 또는 최종 순위 확정 후 종료 |
+| `POST /games/ttf/{game_id}/commands/pause` | `ROUND_INTRO`, `VOTING`, `VOTE_CLOSED`, `RESULT` | 이전 상태와 투표 잔여 시간 보존 후 `PAUSED` |
+| `POST /games/ttf/{game_id}/commands/resume` | `PAUSED` | 이전 상태로 복원하고 필요 시 자동 마감 재예약 |
+| `POST /games/ttf/{game_id}/commands/finish` | 진행 중 또는 `PAUSED` | 공개 완료 점수로 최종 순위를 확정하고 `FINISHED`, 방을 `CLOSED`로 전환 |
+
+투표 연장 요청 body:
+
+```json
+{
+  "seconds": 15
+}
+```
+
+- `seconds`는 `5..60` 정수다.
+- 이미 마감 시각이 지났다면 먼저 투표를 닫으며 연장은 실패한다.
+- 일시 정지 요청이 투표 마감과 경합하면 마감을 먼저 반영할 수 있다.
+- 자동 마감과 수동 마감은 원자적으로 한 번만 상태를 변경한다.
+- 결과 공개 재시도로 점수가 중복 반영되지 않는다.
+
+## 9. SSE 실시간 이벤트
+
+### 9.1 연결
+
+`GET /api/v1/games/ttf/{game_id}/events?audience={audience}`
+
+인증과 공개 대상은 스냅샷의 `audience` 규칙과 같다.
+
+요청 예시:
+
+```http
+GET /api/v1/games/ttf/game_01J7J.../events?audience=participant
+Accept: text/event-stream
+Last-Event-ID: 17
+Cookie: ttf_participant_session=<opaque>
+```
+
+응답 헤더:
 
 ```http
 Content-Type: text/event-stream
 Cache-Control: no-cache, no-transform
-Connection: keep-alive
 X-Accel-Buffering: no
 ```
 
-- 15~25초마다 `: heartbeat` 주석을 보내 idle proxy timeout을 방지한다.
-- 재연결 권장 간격은 `retry: 3000`으로 알린다.
-- 이벤트 `id`는 게임 version과 같거나 재개 가능한 별도 단조 증가 ID다.
-- 브라우저가 보내는 `Last-Event-ID` 이후 이벤트를 재전송할 수 있으면 재전송한다.
-- 보관 범위를 벗어난 이벤트라면 `game.sync_required`를 보내 snapshot 재조회를 유도한다.
+- 연결 직후 `: connected` comment를 보낸다.
+- 20초마다 `: heartbeat` comment를 보낸다.
+- 각 전송에 `retry: 3000`을 지정한다.
+- emitter timeout은 30분이며 클라이언트는 종료 시 재연결해야 한다.
+- 참가자 연결이 모두 끊긴 뒤 5초 동안 재연결되지 않으면 `OFFLINE`으로 반영한다.
+
+### 9.2 이벤트 형식
 
 ```text
 id: 18
 event: vote.progress_changed
 retry: 3000
-data: {"event_id":"evt_01J7K...","room_id":"room_01J7J...","game_id":"game_01J7J...","version":18,"occurred_at":"2026-09-05T10:30:01.000Z"}
+data: {"event_id":"evt_01J7K...","room_id":"room_01J7J...","game_id":"game_01J7J...","version":18,"occurred_at":"2026-09-06T12:35:01Z"}
 
 ```
 
-SSE payload는 변경 알림 역할만 한다. 프론트엔드는 payload를 최종 상태로 사용하지 않고 최신 snapshot을 다시 조회한다. 이 방식은 이벤트 중복·역순·누락 시 정합성을 단순하게 유지한다.
+- SSE `id`는 게임 스트림 내 단조 증가 순번이다.
+- payload의 `event_id`는 개별 이벤트 식별용 불투명 문자열이다.
+- payload는 변경 알림만 전달한다. 최종 화면 상태는 스냅샷으로 확인한다.
 
-### 8.2 이벤트 목록
+### 9.3 재연결
+
+- 서버는 게임별 최근 이벤트 최대 256개를 메모리에 유지한다.
+- 유효한 `Last-Event-ID`가 보관 범위 안에 있으면 이후 이벤트를 순서대로 재전송한다.
+- ID가 숫자가 아니거나 음수, 미래 값 또는 보관 범위보다 오래된 값이면 `game.sync_required`를 보낸다.
+- 연결별 대기 이벤트가 512개를 넘으면 연결을 종료한다. 재연결 후 스냅샷 또는 이벤트 복구 절차를 따른다.
+- 프론트엔드는 이벤트 중복, 역순, version 공백을 발견하면 즉시 스냅샷을 다시 조회한다.
+
+### 9.4 연결 제한
+
+| 범위 | 제한 |
+|---|---:|
+| 동일 subject와 게임 | 최대 2개 |
+| 동일 subject 전체 게임 | 최대 8개 |
+| 동일 client address | 최대 256개 |
+
+제한 초과 시 `429 RATE_LIMITED`, `Retry-After: 3`을 반환한다.
+
+### 9.5 이벤트 목록
 
 | 이벤트 | 발생 시점 |
 |---|---|
-| `participant.joined` | 참가 커밋 후 |
-| `participant.left` | 연결 상태 변경 또는 내보내기 후 |
-| `participant.ready_changed` | 문장 제출/수정으로 준비 상태 변경 후 |
-| `game.status_changed` | TTF 게임 상태 전환 후 |
-| `round.started` | 새 라운드 `ROUND_INTRO` 커밋 후 |
-| `voting.started` | 투표 시작/재개 및 마감 시각 확정 후 |
-| `vote.progress_changed` | 유효 투표자의 최초 투표로 완료 인원이 바뀐 후 |
-| `voting.closed` | 자동 또는 수동 마감 커밋 후 |
-| `round.result_revealed` | 정답과 점수 반영 커밋 후 |
-| `score.updated` | 점수 반영 후. `round.result_revealed`와 같은 version이어도 됨 |
+| `participant.joined` | 참가자 등록 후 |
+| `participant.left` | 참가자 제거 또는 연결 상태 변경 후 |
+| `participant.ready_changed` | 문장 저장으로 준비 상태가 변경된 후 |
+| `game.status_changed` | 게임 상태가 변경된 후 |
+| `round.started` | 새 라운드가 `ROUND_INTRO`로 열린 후 |
+| `voting.started` | 투표 시작, 연장 또는 투표 상태 재개 후 |
+| `vote.progress_changed` | 참가자의 최초 유효 투표로 완료 수가 변경된 후 |
+| `voting.closed` | 자동 또는 수동 투표 마감 후 |
+| `round.result_revealed` | 라운드 결과 공개 후 |
+| `score.updated` | 점수 반영 후 |
 | `game.finished` | 최종 순위 확정 후 |
-| `game.sync_required` | 서버가 이벤트 연속성을 보장할 수 없을 때 |
+| `game.sync_required` | 이벤트 연속성을 보장할 수 없거나 방이 만료된 경우 |
 
-공통 payload:
+## 10. 요청 제한
 
-```json
-{
-  "event_id": "evt_01J7K...",
-  "room_id": "room_01J7J...",
-  "game_id": "game_01J7J...",
-  "version": 18,
-  "occurred_at": "2026-09-05T10:30:01.000Z"
-}
-```
+현재 구현은 고정 시간 창 방식으로 다음 제한을 적용한다.
 
-이벤트에는 원문 문장, `is_fake`, 투표 statement ID, 참가자 토큰을 넣지 않는다. `vote.progress_changed`에도 개별 voter를 포함하지 않는다.
+| 동작 | 식별 범위 | 제한 |
+|---|---|---:|
+| 방 생성 | client address | 분당 10회 |
+| 방 코드 조회 | client address | 분당 60회 |
+| 방 참가 | client address + 방 | 분당 20회 |
+| 참가자 내보내기 | 진행자 세션 | 초당 5회 |
+| 방 취소 | 진행자 세션 | 초당 5회 |
+| 문장 저장 | 참가자 세션 | 분당 10회 |
+| 투표 등록·변경 | 참가자 세션 | 초당 5회 |
+| TTF 진행자 명령 | 진행자 세션 | 초당 5회, 설정 가능 |
 
-## 9. Rate limit 권장값
+SSE 연결 제한은 9.4절을 따른다.
 
-정확한 구현 방식은 백엔드가 결정하지만 최소한 다음 범위를 분리해 제한한다.
+## 11. 수명 주기와 삭제
 
-| 범위 | 권장 제한 |
+기본 설정:
+
+| 설정 | 기본값 |
 |---|---:|
-| 방 코드 조회 | IP당 분당 60회 |
-| 방 생성 | IP당 분당 10회 |
-| 참가 시도 | IP + 방당 분당 20회 |
-| 문장 저장 | 참가 세션당 분당 10회 |
-| 투표 변경 | 참가 세션당 초당 5회 |
-| 진행자 명령 | 진행자 세션당 초당 5회 |
-| SSE 연결 | 세션/방당 2개, IP당 합리적 상한 |
+| 활성 방 TTL | 6시간 |
+| 종료 상태 grace period | 5분 |
+| 정리 sweep 주기 | 30초 |
 
-이는 초기값이며 100명 부하 테스트와 운영 지표에 따라 조정한다.
+- 활성 TTL을 넘은 `OPEN` 또는 `IN_GAME` 방은 `EXPIRED`로 전환하고 `game.sync_required`를 발행한다.
+- `FINISHED`, `CANCELLED`, `EXPIRED` 방은 grace period 동안 마지막 상태를 전달할 수 있다.
+- 삭제 시 방, 게임, 참가자, 문장, 라운드, 투표와 점수 데이터를 제거한다.
+- 방에 연결된 진행자·참가자 권한, 투표 스케줄, SSE 스트림과 멱등성 기록도 함께 제거한다.
+- 종료 게임 조회, 영구 기록과 히스토리 API는 제공하지 않는다.
 
-## 10. 수명 주기와 삭제
+## 12. 클라이언트 구현 체크리스트
 
-- 영구 게임 기록, 사용자 프로필, 과거 결과 조회 endpoint는 MVP에 없다.
-- 활성 게임과 같은 브라우저 재접속 복구에 필요한 데이터만 저장한다.
-- TTF의 `FINISHED`·`CANCELLED` 또는 방의 `EXPIRED` 상태는 연결된 클라이언트가 마지막 화면/안내를 받을 짧은 grace period 동안만 조회 가능하게 유지할 수 있다.
-- grace period 종료 후 방, 게임, 참가자, 문장, 라운드, 투표, 점수, 세션 및 idempotency record를 함께 삭제한다.
-- 정확한 grace period는 배포 설정으로 관리하되 장기 보관 목적으로 늘리지 않는다.
-
-## 11. 프론트엔드 연동 체크리스트
-
-- 쿠키와 credential 포함 요청이 로컬/운영 환경 모두에서 동작한다.
-- 방 API 응답의 `game.id`를 게임 API에 사용하며 `room_id`와 혼용하지 않는다.
-- 알려지지 않은 `active_game.type`은 TTF 화면으로 열지 않는다.
-- snapshot audience별 계약 테스트에서 공개 전 `is_fake`와 투표 상세가 존재하지 않는다.
-- 같은 닉네임 동시 입장 시 하나만 성공한다.
-- 투표 마감 직전/직후 경합에서 늦은 표가 집계되지 않는다.
-- `Idempotency-Key` 재전송으로 방, 점수, 다음 라운드가 중복 생성되지 않는다.
-- SSE가 중복·역순으로 도착하거나 끊긴 뒤에도 snapshot version으로 복구한다.
-- 진행자 두 탭의 상충 명령 중 먼저 커밋된 유효 전환만 성공한다.
-- 참가자와 진행자가 새로고침한 뒤 쿠키만으로 동일 역할과 현재 상태를 복구한다.
-- 100명 방에서 일반 API p95 500ms, 상태 전파 p95 1초, 결과 집계 2초 이내를 확인한다.
+- 모든 필드명을 `snake_case`로 처리한다.
+- 생성·조회 JSON 응답에서 `data`를 사용하고 `204`에서는 body를 파싱하지 않는다.
+- 방 생성·참가 응답의 `game.id`를 TTF API path에 사용한다.
+- `room_id`와 `game_id`를 혼용하지 않는다.
+- 쿠키가 필요한 요청은 `credentials: include`로 전송한다.
+- 모든 변경 요청에 신뢰 가능한 `Origin` 또는 `Sec-Fetch-Site`가 전달되도록 한다.
+- 멱등성 대상 요청마다 안정적인 `Idempotency-Key`를 생성하고 재시도에는 같은 키를 사용한다.
+- 멱등 재요청의 `response_time` 일치를 기대하지 않고 `data`와 HTTP status를 기준으로 처리한다.
+- 투표 타이머는 `server_time`과 `voting_ends_at`으로 표시하되 마감 판정은 서버 응답을 따른다.
+- 공개 전 `is_fake`, 결과와 개별 투표 정보를 클라이언트 상태에 미리 저장하지 않는다.
+- SSE 이벤트를 최종 상태로 사용하지 않고 snapshot version을 기준으로 동기화한다.
+- `game.sync_required`, 이벤트 누락, 역순 또는 연결 종료 시 스냅샷을 다시 조회한다.

@@ -28,7 +28,7 @@ export function AppShell({ children, compact = false, headerAside }: AppShellPro
         {headerAside ? <div className="topbar__aside">{headerAside}</div> : null}
       </header>
       <main className="page">{children}</main>
-      <footer className="footer">서로를 조금 더 알아가는 가장 가벼운 방법</footer>
+      {/* <footer className="footer">서로를 조금 더 알아가는 가장 가벼운 방법</footer> */}
     </div>
   )
 }

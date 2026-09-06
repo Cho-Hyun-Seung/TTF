@@ -35,7 +35,6 @@ export const ttfGameApi = {
   saveStatements(gameId: string, statements: StatementDraft[]) {
     return request<void>(`${ttfGamePath(gameId)}/participants/me/statements`, {
       method: 'PUT',
-      headers: idempotencyHeaders(),
       body: JSON.stringify({
         statements: statements.map((statement) => ({
           content: statement.content.trim(),
@@ -50,7 +49,6 @@ export const ttfGameApi = {
       `${ttfGamePath(gameId)}/rounds/${encodeURIComponent(roundId)}/vote`,
       {
         method: 'PUT',
-        headers: idempotencyHeaders(),
         body: JSON.stringify({ statement_id: statementId }),
       },
     )

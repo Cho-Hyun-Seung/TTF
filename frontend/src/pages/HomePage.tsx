@@ -22,7 +22,7 @@ export function HomePage() {
     <AppShell>
       <section className="hero">
         <div className="hero__copy">
-          <p className="eyebrow">QR로 바로 시작하는 아이스브레이킹</p>
+          {/* <p className="eyebrow">QR로 바로 시작하는 아이스브레이킹</p> */}
           <h1>우리 사이,<br /><em>세 문장</em>이면 충분해요.</h1>
           <p className="hero__description">
             진짜 이야기 둘과 그럴듯한 가짜 하나.<br />누가 가장 감쪽같이 모두를 속일까요?
@@ -31,7 +31,7 @@ export function HomePage() {
             <Link className="button button--primary" to="/rooms/new">
               게임방 만들기 <ArrowRightIcon />
             </Link>
-            <span>회원가입도, 앱 설치도 필요 없어요</span>
+            {/* <span>회원가입도, 앱 설치도 필요 없어요</span> */}
           </div>
         </div>
 

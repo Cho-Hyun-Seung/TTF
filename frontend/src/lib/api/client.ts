@@ -1,10 +1,14 @@
-interface ErrorBody {
-  error?: {
-    code?: string
-    message?: string
-    field_errors?: Record<string, string>
-    request_id?: string
-  }
+interface ApiSuccessBody<T> {
+  success: true
+  data: T
+  response_time: string
+}
+
+interface ApiErrorBody {
+  success?: false
+  error_code?: string
+  message?: string
+  response_time?: string
 }
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
@@ -12,16 +16,12 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, ''
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
-  readonly fieldErrors?: Record<string, string>
-  readonly requestId?: string
 
-  constructor(status: number, body: ErrorBody) {
-    super(body.error?.message ?? '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.')
+  constructor(status: number, body: ApiErrorBody) {
+    super(body.message ?? '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.')
     this.name = 'ApiError'
     this.status = status
-    this.code = body.error?.code ?? 'UNKNOWN_ERROR'
-    this.fieldErrors = body.error?.field_errors
-    this.requestId = body.error?.request_id
+    this.code = body.error_code ?? 'UNKNOWN_ERROR'
   }
 }
 
@@ -37,9 +37,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    let body: ErrorBody = {}
+    let body: ApiErrorBody = {}
     try {
-      body = (await response.json()) as ErrorBody
+      body = (await response.json()) as ApiErrorBody
     } catch {
       // The fallback message intentionally avoids exposing an untrusted server body.
     }
@@ -47,7 +47,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (response.status === 204) return undefined as T
-  return (await response.json()) as T
+
+  const body = (await response.json()) as ApiSuccessBody<T>
+  if (body.success !== true || !Object.hasOwn(body, 'data')) {
+    throw new Error('서버 응답 형식이 올바르지 않아요.')
+  }
+  return body.data
 }
 
 export function idempotencyHeaders() {
