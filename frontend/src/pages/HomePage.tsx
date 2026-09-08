@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { GameGuideModal } from '../components/GameGuideModal'
 import { ArrowRightIcon, CheckIcon, UsersIcon } from '../components/Icons'
 import { normalizeRoomCode, ROOM_CODE_PATTERN } from '../domain/validation'
 
 export function HomePage() {
   const [code, setCode] = useState('')
+  const [isGuideOpen, setIsGuideOpen] = useState(false)
   const [showError, setShowError] = useState(false)
   const navigate = useNavigate()
 
@@ -31,6 +33,9 @@ export function HomePage() {
             <Link className="button button--primary" to="/rooms/new">
               게임방 만들기 <ArrowRightIcon />
             </Link>
+            <button className="button button--secondary" onClick={() => setIsGuideOpen(true)} type="button">
+              게임 설명
+            </button>
             {/* <span>회원가입도, 앱 설치도 필요 없어요</span> */}
           </div>
         </div>
@@ -78,12 +83,13 @@ export function HomePage() {
         </div>
         <ol className="step-grid">
           <li><span>01</span><div><h3>QR로 모이기</h3><p>진행자가 띄운 QR을 스캔하고 닉네임만 입력해요.</p></div></li>
-          <li><span>02</span><div><h3>세 문장 적기</h3><p>나에 관한 진짜 둘과 그럴듯한 가짜 하나를 적어요.</p></div></li>
+          <li><span>02</span><div><h3>주제별로 적기</h3><p>선택된 주제마다 나에 관한 진짜 둘과 그럴듯한 가짜 하나를 적어요.</p></div></li>
           <li><span>03</span><div><h3>가짜 맞히기</h3><p>서로의 이야기를 듣고 가짜라고 생각하는 문장에 투표해요.</p></div></li>
         </ol>
         <p className="feature-note"><CheckIcon /> 최대 100명까지 함께할 수 있어요</p>
       </section>
+
+      <GameGuideModal onClose={() => setIsGuideOpen(false)} open={isGuideOpen} />
     </AppShell>
   )
 }
-

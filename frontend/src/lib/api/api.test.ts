@@ -48,6 +48,8 @@ describe('roomApi', () => {
           voting_duration_seconds: 60,
           speaker_order: 'RANDOM',
           anonymous_voting: true,
+          round_count: 1,
+          topic_ids: ['TRAVEL'],
         },
       },
     }
@@ -124,6 +126,14 @@ describe('roomApi', () => {
 })
 
 describe('ttfGameApi', () => {
+  it('loads the server-owned topic catalog', async () => {
+    const topics = [{ id: 'TRAVEL', title: '여행', example: '나는 혼자 해외여행을 떠난 적이 있다.' }]
+    fetchMock.mockResolvedValue(success(topics))
+
+    await expect(ttfGameApi.getTopics()).resolves.toEqual(topics)
+    expect(requestedPath(1)).toBe('/api/v1/games/ttf/topics')
+  })
+
   it('uses the TTF game id for snapshot and realtime endpoints', async () => {
     fetchMock.mockResolvedValue(success({ version: 3, server_time: '2026-09-05T00:00:00.000Z' }))
 
@@ -140,11 +150,14 @@ describe('ttfGameApi', () => {
   it('keeps TTF inputs and round commands under the game API', async () => {
     fetchMock.mockResolvedValue(response())
 
-    await ttfGameApi.saveStatements('game-1', [
-      { content: ' 진짜 문장 하나 ', truth: 'TRUE' },
-      { content: '진짜 문장 둘', truth: 'TRUE' },
-      { content: '가짜 문장 하나', truth: 'FAKE' },
-    ])
+    await ttfGameApi.saveStatements('game-1', [{
+      topic_id: 'TRAVEL',
+      statements: [
+        { content: ' 진짜 문장 하나 ', truth: 'TRUE' },
+        { content: '진짜 문장 둘', truth: 'TRUE' },
+        { content: '가짜 문장 하나', truth: 'FAKE' },
+      ],
+    }])
     await ttfGameApi.submitVote('game-1', 'round-1', 'statement-1')
     await ttfGameApi.startVoting('game-1', 'round-1')
 
@@ -152,10 +165,15 @@ describe('ttfGameApi', () => {
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({
-        statements: [
-          { content: '진짜 문장 하나', is_fake: false },
-          { content: '진짜 문장 둘', is_fake: false },
-          { content: '가짜 문장 하나', is_fake: true },
+        statement_sets: [
+          {
+            topic_id: 'TRAVEL',
+            statements: [
+              { content: '진짜 문장 하나', is_fake: false },
+              { content: '진짜 문장 둘', is_fake: false },
+              { content: '가짜 문장 하나', is_fake: true },
+            ],
+          },
         ],
       }),
     }))

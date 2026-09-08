@@ -20,6 +20,7 @@ import com.toki.ttf.domain.ttf.result.VoteSubmission;
 import com.toki.ttf.domain.ttf.constants.SnapshotAudience;
 import com.toki.ttf.domain.ttf.constants.TtfGameStatus;
 import com.toki.ttf.domain.ttf.value.StatementDraft;
+import com.toki.ttf.domain.ttf.value.StatementSetDraft;
 import com.toki.ttf.infrastructure.idempotency.IdempotencyService;
 import com.toki.ttf.infrastructure.ratelimit.RateLimitService;
 import com.toki.ttf.infrastructure.scheduling.VotingScheduler;
@@ -60,7 +61,7 @@ public class TtfGameService {
     private final int commandRatePerSecond;
 
     /**
-     * 지연된 투표 마감을 먼저 반영한 뒤 요청 대상에게 허용된 최신 게임 스냅샷을 생성합니다.
+     * 지연된 투표 마감과 자동 결과 공개를 반영한 뒤 최신 게임 스냅샷을 생성합니다.
      * 참가자와 진행자에게는 각각의 세션 권한을 적용하고, 공개 시점 전의 정보는 포함하지 않습니다.
      *
      * @return 대상별 공개 범위가 적용된 게임 스냅샷 응답 DTO
@@ -73,6 +74,7 @@ public class TtfGameService {
     ) {
         Room room = roomService.requireRoomByGameId(gameId);
         closeDueVotingIfNeeded(room);
+        revealDueResultIfNeeded(room);
         SnapshotAudience audience = SnapshotAudience.parse(audienceValue);
         synchronized (room) {
             SessionService.ParticipantGrant participantGrant = authorize(
@@ -165,11 +167,16 @@ public class TtfGameService {
         GameMutationResult mutation = roomRepository.update(room.id(), current -> {
             TtfGameStatus beforeStatus = current.activeGame().status();
             long beforeVersion = current.version();
-            List<StatementDraft> drafts = request.statements().stream()
-                    .map(statement -> new StatementDraft(
-                            statement.content(), Boolean.TRUE.equals(statement.isFake())))
+            List<StatementSetDraft> statementSets = request.statementSets().stream()
+                    .map(statementSet -> new StatementSetDraft(
+                            statementSet.topicId(),
+                            statementSet.statements().stream()
+                                    .map(statement -> new StatementDraft(
+                                            statement.content(), Boolean.TRUE.equals(statement.isFake())))
+                                    .toList()
+                    ))
                     .toList();
-            current.saveStatements(grant.participantId(), drafts, Instant.now());
+            current.saveStatementSets(grant.participantId(), statementSets, Instant.now());
             return GameMutationResult.of(current, beforeVersion, beforeStatus);
         });
         if (mutation.changed()) {
@@ -226,6 +233,11 @@ public class TtfGameService {
         }
         if (mutation.submission().firstVote()) {
             publish("vote.progress_changed", room);
+        }
+        if (mutation.submission().votingClosed()) {
+            scheduleResultReveal(room);
+            publish("voting.closed", room);
+            publish("game.status_changed", room);
         }
     }
 
@@ -380,6 +392,7 @@ public class TtfGameService {
                 }
         );
         if (!execution.replayed() && "changed".equals(execution.result().marker())) {
+            votingScheduler.cancel(gameId, execution.result().generation());
             publish("round.result_revealed", execution.room());
             publish("score.updated", execution.room());
             publish("game.status_changed", execution.room());
@@ -473,10 +486,7 @@ public class TtfGameService {
                 }
         );
         if (!execution.replayed()) {
-            if (execution.result().state() == TtfGameStatus.VOTING
-                    || "deadline_closed".equals(execution.result().marker())) {
-                votingScheduler.cancel(gameId, execution.result().generation());
-            }
+            votingScheduler.cancel(gameId, execution.result().generation());
             if ("deadline_closed".equals(execution.result().marker())) {
                 publish("voting.closed", execution.room());
             }
@@ -485,7 +495,7 @@ public class TtfGameService {
     }
 
     /**
-     * 일시 정지된 게임을 재개하고, 투표 중이었다면 남은 마감 작업을 다시 예약합니다.
+     * 일시 정지된 게임을 재개하고 남은 투표 마감 또는 결과 공개를 다시 예약합니다.
      */
     public void resume(
             String gameId,
@@ -518,6 +528,9 @@ public class TtfGameService {
                         execution.result().generation()
                 );
                 publish("voting.started", execution.room());
+            }
+            if (execution.result().state() == TtfGameStatus.VOTE_CLOSED) {
+                scheduleResultReveal(execution.room());
             }
             publish("game.status_changed", execution.room());
         }
@@ -645,6 +658,62 @@ public class TtfGameService {
     private void scheduleTerminalDeletionIfNeeded(Room room, Instant now) {
         if (room.activeGame().status() == TtfGameStatus.FINISHED) {
             room.scheduleDeletionAt(now.plus(roomService.terminalGracePeriod()));
+        }
+    }
+
+    private void scheduleResultReveal(Room room) {
+        synchronized (room) {
+            if (room.activeGame().status() != TtfGameStatus.VOTE_CLOSED) {
+                return;
+            }
+            Round round = room.activeGame().currentRound().orElseThrow();
+            if (round.resultRevealsAt() == null) {
+                return;
+            }
+            String gameId = room.activeGame().id();
+            votingScheduler.schedule(
+                    gameId,
+                    room.version(),
+                    round.resultRevealsAt(),
+                    () -> autoReveal(gameId, round.id())
+            );
+        }
+    }
+
+    private void revealDueResultIfNeeded(Room room) {
+        String roundId;
+        synchronized (room) {
+            if (room.activeGame().status() != TtfGameStatus.VOTE_CLOSED) {
+                return;
+            }
+            Round round = room.activeGame().currentRound().orElseThrow();
+            if (round.resultRevealsAt() == null || Instant.now().isBefore(round.resultRevealsAt())) {
+                return;
+            }
+            roundId = round.id();
+        }
+        autoReveal(room.activeGame().id(), roundId);
+    }
+
+    private void autoReveal(String gameId, String roundId) {
+        Room room;
+        try {
+            room = roomService.requireRoomByGameId(gameId);
+        } catch (ApiException ignored) {
+            return;
+        }
+        GameMutationResult mutation = roomRepository.update(room.id(), current -> {
+            TtfGameStatus beforeStatus = current.activeGame().status();
+            long beforeVersion = current.version();
+            current.revealResultIfDue(roundId, Instant.now());
+            return GameMutationResult.of(current, beforeVersion, beforeStatus);
+        });
+        if (mutation.changed()) {
+            // A newer pause/resume or round schedule must survive this post-commit cancellation.
+            votingScheduler.cancel(gameId, mutation.afterVersion());
+            publish("round.result_revealed", room);
+            publish("score.updated", room);
+            publish("game.status_changed", room);
         }
     }
 

@@ -3,11 +3,13 @@ package com.toki.ttf.domain.ttf.entity;
 import com.toki.ttf.domain.common.DomainException;
 import com.toki.ttf.domain.ttf.result.VoteSubmission;
 import com.toki.ttf.domain.ttf.constants.SpeakerOrder;
+import com.toki.ttf.domain.ttf.constants.TtfTopic;
 import com.toki.ttf.domain.ttf.constants.TtfGameStatus;
 import com.toki.ttf.domain.ttf.value.LeaderboardEntry;
 import com.toki.ttf.domain.ttf.value.RoundResult;
 import com.toki.ttf.domain.ttf.value.ScoreChange;
 import com.toki.ttf.domain.ttf.value.StatementDraft;
+import com.toki.ttf.domain.ttf.value.StatementSetDraft;
 import com.toki.ttf.domain.ttf.value.StatementResult;
 import com.toki.ttf.domain.ttf.value.TtfGameSettings;
 import lombok.Getter;
@@ -19,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,6 +36,7 @@ import java.util.regex.Pattern;
 @Accessors(fluent = true)
 public final class TtfGame {
     private static final Pattern WHITESPACE = Pattern.compile("(?U)\\s+");
+    private static final Duration RESULT_REVEAL_DELAY = Duration.ofSeconds(2);
 
     @Getter
     private final String id;
@@ -43,12 +47,14 @@ public final class TtfGame {
     @Getter
     private final Instant createdAt;
     private final Map<String, TtfPlayer> players = new LinkedHashMap<>();
-    private final Map<String, List<Statement>> statementsByParticipantId = new LinkedHashMap<>();
+    private final Map<String, Map<TtfTopic, List<Statement>>> statementSetsByParticipantId =
+            new LinkedHashMap<>();
     private final List<Round> rounds = new ArrayList<>();
     private final List<LeaderboardEntry> leaderboard = new ArrayList<>();
     private TtfGameStatus status;
     private TtfGameStatus pausedFromStatus;
     private Duration pausedVotingTimeRemaining;
+    private Duration pausedResultTimeRemaining;
     private int currentRoundIndex = -1;
     private int nextJoinOrder;
     private long version;
@@ -83,7 +89,7 @@ public final class TtfGame {
         if (removed == null) {
             return false;
         }
-        statementsByParticipantId.remove(participantId);
+        statementSetsByParticipantId.remove(participantId);
         reevaluatePreparationStatus();
         incrementVersion();
         return true;
@@ -95,38 +101,62 @@ public final class TtfGame {
             RandomGenerator random,
             Instant now
     ) {
+        if (settings.roundCount() != 1) {
+            throw validation("모든 라운드 주제의 문장을 함께 제출해 주세요.");
+        }
+        return saveStatementSets(
+                participantId,
+                List.of(new StatementSetDraft(settings.topics().get(0), drafts)),
+                random,
+                now
+        );
+    }
+
+    public synchronized List<Statement> saveStatementSets(
+            String participantId,
+            List<StatementSetDraft> statementSetDrafts,
+            RandomGenerator random,
+            Instant now
+    ) {
         requirePreGameMutation();
         TtfPlayer player = requirePlayer(participantId);
         Objects.requireNonNull(random, "random");
         Objects.requireNonNull(now, "now");
-        List<StatementDraft> normalizedDrafts = validateAndNormalizeStatements(drafts);
-        List<Statement> current = statementsByParticipantId.get(participantId);
-        if (hasSameRepresentation(current, normalizedDrafts)) {
-            return current;
+        Map<TtfTopic, List<StatementDraft>> normalizedSets =
+                validateAndNormalizeStatementSets(statementSetDrafts);
+        Map<TtfTopic, List<Statement>> current = statementSetsByParticipantId.get(participantId);
+        if (hasSameRepresentation(current, normalizedSets)) {
+            return flattenStatements(current);
         }
 
-        List<Integer> displayOrders = new ArrayList<>(List.of(1, 2, 3));
-        shuffle(displayOrders, random);
-        List<Statement> statements = new ArrayList<>(3);
-        for (int index = 0; index < normalizedDrafts.size(); index++) {
-            StatementDraft draft = normalizedDrafts.get(index);
-            statements.add(new Statement(
-                    newOpaqueId("statement_"),
-                    id,
-                    participantId,
-                    draft.content(),
-                    draft.fake(),
-                    displayOrders.get(index),
-                    now
-            ));
+        Map<TtfTopic, List<Statement>> statementSets = new LinkedHashMap<>();
+        for (TtfTopic topic : settings.topics()) {
+            List<StatementDraft> normalizedDrafts = normalizedSets.get(topic);
+            List<Integer> displayOrders = new ArrayList<>(List.of(1, 2, 3));
+            shuffle(displayOrders, random);
+            List<Statement> statements = new ArrayList<>(3);
+            for (int index = 0; index < normalizedDrafts.size(); index++) {
+                StatementDraft draft = normalizedDrafts.get(index);
+                statements.add(new Statement(
+                        newOpaqueId("statement_"),
+                        id,
+                        participantId,
+                        topic,
+                        draft.content(),
+                        draft.fake(),
+                        displayOrders.get(index),
+                        now
+                ));
+            }
+            statementSets.put(topic, List.copyOf(statements));
         }
 
-        List<Statement> immutableStatements = List.copyOf(statements);
-        statementsByParticipantId.put(participantId, immutableStatements);
+        Map<TtfTopic, List<Statement>> immutableStatementSets = Map.copyOf(statementSets);
+        statementSetsByParticipantId.put(participantId, immutableStatementSets);
         player.markReady();
         reevaluatePreparationStatus();
         incrementVersion();
-        return immutableStatements;
+        return flattenStatements(immutableStatementSets);
     }
 
     public synchronized void start(Instant now) {
@@ -157,19 +187,21 @@ public final class TtfGame {
         }
 
         rounds.clear();
-        for (int index = 0; index < speakerOrder.size(); index++) {
-            TtfPlayer speaker = speakerOrder.get(index);
-            List<Statement> visibleStatements = statementsByParticipantId.get(speaker.participantId())
-                    .stream()
-                    .sorted(Comparator.comparingInt(Statement::displayOrder))
-                    .toList();
-            rounds.add(new Round(
-                    newOpaqueId("round_"),
-                    id,
-                    speaker.participantId(),
-                    index + 1,
-                    visibleStatements
-            ));
+        int roundNumber = 1;
+        for (TtfTopic topic : settings.topics()) {
+            for (TtfPlayer speaker : speakerOrder) {
+                List<Statement> visibleStatements = statementsFor(speaker.participantId(), topic).stream()
+                        .sorted(Comparator.comparingInt(Statement::displayOrder))
+                        .toList();
+                rounds.add(new Round(
+                        newOpaqueId("round_"),
+                        id,
+                        speaker.participantId(),
+                        topic,
+                        roundNumber++,
+                        visibleStatements
+                ));
+            }
         }
         currentRoundIndex = 0;
         status = TtfGameStatus.ROUND_INTRO;
@@ -231,8 +263,14 @@ public final class TtfGame {
 
         boolean firstVote = previous.isEmpty();
         round.putVote(voterParticipantId, statementId, submittedAt);
+        boolean votingClosed = round.voteCount() == eligibleVoterCount();
+        if (votingClosed) {
+            round.closeVoting();
+            round.scheduleResultReveal(submittedAt.plus(RESULT_REVEAL_DELAY));
+            status = TtfGameStatus.VOTE_CLOSED;
+        }
         incrementVersion();
-        return new VoteSubmission(true, firstVote, false);
+        return new VoteSubmission(true, firstVote, votingClosed);
     }
 
     public synchronized void closeVoting(String roundId) {
@@ -272,6 +310,10 @@ public final class TtfGame {
             return round.result().orElseThrow();
         }
         requireStatus(TtfGameStatus.VOTE_CLOSED);
+        Objects.requireNonNull(now, "now");
+        if (round.resultRevealsAt() != null && now.isBefore(round.resultRevealsAt())) {
+            throw invalidTransition();
+        }
 
         Statement fakeStatement = round.statements().stream()
                 .filter(Statement::fake)
@@ -309,7 +351,7 @@ public final class TtfGame {
                 .toList();
 
         Set<String> correctVoterIds = new HashSet<>(votersByStatementId.get(fakeStatement.id()));
-        List<ScoreChange> scoreChanges = new ArrayList<>(correctVoterIds.size());
+        List<ScoreChange> scoreChanges = new ArrayList<>(correctVoterIds.size() + 1);
         for (TtfPlayer player : players.values()) {
             if (correctVoterIds.contains(player.participantId())) {
                 player.addScore(1);
@@ -318,6 +360,11 @@ public final class TtfGame {
         }
 
         int fooledCount = totalVotes - correctVoterIds.size();
+        if (fooledCount > 0) {
+            TtfPlayer speaker = requirePlayer(round.speakerParticipantId());
+            speaker.addScore(fooledCount);
+            scoreChanges.add(new ScoreChange(speaker.participantId(), fooledCount, speaker.score()));
+        }
         RoundResult result = new RoundResult(
                 fakeStatement.id(),
                 statementResults,
@@ -329,6 +376,20 @@ public final class TtfGame {
         status = TtfGameStatus.RESULT;
         incrementVersion();
         return result;
+    }
+
+    public synchronized boolean revealResultIfDue(String roundId, Instant now) {
+        if (status != TtfGameStatus.VOTE_CLOSED) {
+            return false;
+        }
+        Round round = currentRoundRequired();
+        if (!round.id().equals(roundId)
+                || round.resultRevealsAt() == null
+                || Objects.requireNonNull(now, "now").isBefore(round.resultRevealsAt())) {
+            return false;
+        }
+        revealResult(roundId, now);
+        return true;
     }
 
     public synchronized void skipRound(String roundId) {
@@ -360,6 +421,12 @@ public final class TtfGame {
         } else {
             pausedVotingTimeRemaining = null;
         }
+        if (status == TtfGameStatus.VOTE_CLOSED && currentRoundRequired().resultRevealsAt() != null) {
+            Duration remaining = Duration.between(now, currentRoundRequired().resultRevealsAt());
+            pausedResultTimeRemaining = remaining.isNegative() ? Duration.ZERO : remaining;
+        } else {
+            pausedResultTimeRemaining = null;
+        }
         status = TtfGameStatus.PAUSED;
         incrementVersion();
     }
@@ -372,9 +439,13 @@ public final class TtfGame {
             Duration remaining = Objects.requireNonNull(pausedVotingTimeRemaining, "pausedVotingTimeRemaining");
             currentRoundRequired().extendVotingTo(now.plus(remaining));
         }
+        if (resumedStatus == TtfGameStatus.VOTE_CLOSED && pausedResultTimeRemaining != null) {
+            currentRoundRequired().scheduleResultReveal(now.plus(pausedResultTimeRemaining));
+        }
         status = resumedStatus;
         pausedFromStatus = null;
         pausedVotingTimeRemaining = null;
+        pausedResultTimeRemaining = null;
         incrementVersion();
     }
 
@@ -445,8 +516,15 @@ public final class TtfGame {
     }
 
     public synchronized List<Statement> statementsFor(String participantId) {
-        List<Statement> statements = statementsByParticipantId.get(participantId);
-        return statements == null ? List.of() : statements;
+        return flattenStatements(statementSetsByParticipantId.get(participantId));
+    }
+
+    public synchronized List<Statement> statementsFor(String participantId, TtfTopic topic) {
+        Map<TtfTopic, List<Statement>> statementSets = statementSetsByParticipantId.get(participantId);
+        if (statementSets == null) {
+            return List.of();
+        }
+        return statementSets.getOrDefault(topic, List.of());
     }
 
     public synchronized List<LeaderboardEntry> leaderboard() {
@@ -501,6 +579,42 @@ public final class TtfGame {
         return List.copyOf(normalized);
     }
 
+    private Map<TtfTopic, List<StatementDraft>> validateAndNormalizeStatementSets(
+            List<StatementSetDraft> statementSetDrafts
+    ) {
+        if (statementSetDrafts == null
+                || statementSetDrafts.size() != settings.roundCount()
+                || statementSetDrafts.stream().anyMatch(Objects::isNull)) {
+            throw validation("문장 세트 수는 설정한 라운드 수와 같아야 합니다.");
+        }
+
+        Map<TtfTopic, List<StatementDraft>> provided = new EnumMap<>(TtfTopic.class);
+        for (StatementSetDraft statementSet : statementSetDrafts) {
+            if (statementSet.topic() == null || !settings.topics().contains(statementSet.topic())) {
+                throw validation("게임에 선택된 라운드 주제만 제출할 수 있습니다.");
+            }
+            if (provided.put(statementSet.topic(), validateAndNormalizeStatements(statementSet.statements())) != null) {
+                throw validation("같은 라운드 주제를 중복해서 제출할 수 없습니다.");
+            }
+        }
+        if (!provided.keySet().containsAll(settings.topics())) {
+            throw validation("모든 라운드 주제의 문장을 제출해 주세요.");
+        }
+
+        Set<String> allContents = new HashSet<>();
+        Map<TtfTopic, List<StatementDraft>> ordered = new LinkedHashMap<>();
+        for (TtfTopic topic : settings.topics()) {
+            List<StatementDraft> drafts = provided.get(topic);
+            for (StatementDraft draft : drafts) {
+                if (!allContents.add(draft.content())) {
+                    throw validation("다른 주제에도 같은 문장을 중복해서 제출할 수 없습니다.");
+                }
+            }
+            ordered.put(topic, drafts);
+        }
+        return ordered;
+    }
+
     private String normalizeStatement(String content) {
         if (content == null) {
             throw validation("문장 내용은 필수입니다.");
@@ -514,18 +628,37 @@ public final class TtfGame {
         return normalized;
     }
 
-    private static boolean hasSameRepresentation(List<Statement> current, List<StatementDraft> drafts) {
-        if (current == null || current.size() != drafts.size()) {
+    private static boolean hasSameRepresentation(
+            Map<TtfTopic, List<Statement>> current,
+            Map<TtfTopic, List<StatementDraft>> drafts
+    ) {
+        if (current == null || !current.keySet().equals(drafts.keySet())) {
             return false;
         }
-        for (int index = 0; index < current.size(); index++) {
-            Statement statement = current.get(index);
-            StatementDraft draft = drafts.get(index);
-            if (!statement.content().equals(draft.content()) || statement.fake() != draft.fake()) {
+        for (TtfTopic topic : drafts.keySet()) {
+            List<Statement> currentStatements = current.get(topic);
+            List<StatementDraft> currentDrafts = drafts.get(topic);
+            if (currentStatements == null || currentStatements.size() != currentDrafts.size()) {
                 return false;
+            }
+            for (int index = 0; index < currentStatements.size(); index++) {
+                Statement statement = currentStatements.get(index);
+                StatementDraft draft = currentDrafts.get(index);
+                if (!statement.content().equals(draft.content()) || statement.fake() != draft.fake()) {
+                    return false;
+                }
             }
         }
         return true;
+    }
+
+    private List<Statement> flattenStatements(Map<TtfTopic, List<Statement>> statementSets) {
+        if (statementSets == null) {
+            return List.of();
+        }
+        return settings.topics().stream()
+                .flatMap(topic -> statementSets.getOrDefault(topic, List.of()).stream())
+                .toList();
     }
 
     private void moveToNextRoundOrFinish() {

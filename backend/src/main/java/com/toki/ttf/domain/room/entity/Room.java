@@ -9,6 +9,7 @@ import com.toki.ttf.domain.ttf.entity.TtfGame;
 import com.toki.ttf.domain.ttf.result.VoteSubmission;
 import com.toki.ttf.domain.ttf.value.RoundResult;
 import com.toki.ttf.domain.ttf.value.StatementDraft;
+import com.toki.ttf.domain.ttf.value.StatementSetDraft;
 import com.toki.ttf.domain.ttf.value.TtfGameSettings;
 import lombok.Getter;
 import lombok.experimental.Accessors;
@@ -185,6 +186,40 @@ public final class Room {
         return statements;
     }
 
+    public synchronized List<Statement> saveStatementSets(
+            String participantId,
+            List<StatementSetDraft> statementSets,
+            Instant now
+    ) {
+        requireParticipant(participantId);
+        long previousVersion = activeGame.version();
+        List<Statement> statements = activeGame.saveStatementSets(
+                participantId,
+                statementSets,
+                new java.security.SecureRandom(),
+                now
+        );
+        if (activeGame.version() != previousVersion) {
+            touch(now);
+        }
+        return statements;
+    }
+
+    public synchronized List<Statement> saveStatementSets(
+            String participantId,
+            List<StatementSetDraft> statementSets,
+            RandomGenerator random,
+            Instant now
+    ) {
+        requireParticipant(participantId);
+        long previousVersion = activeGame.version();
+        List<Statement> statements = activeGame.saveStatementSets(participantId, statementSets, random, now);
+        if (activeGame.version() != previousVersion) {
+            touch(now);
+        }
+        return statements;
+    }
+
     public synchronized List<Statement> saveStatements(
             String participantId,
             List<StatementDraft> drafts,
@@ -264,6 +299,17 @@ public final class Room {
             touch(now);
         }
         return result;
+    }
+
+    public synchronized boolean revealResultIfDue(String roundId, Instant now) {
+        if (status != RoomStatus.IN_GAME) {
+            return false;
+        }
+        boolean revealed = activeGame.revealResultIfDue(roundId, now);
+        if (revealed) {
+            touch(now);
+        }
+        return revealed;
     }
 
     public synchronized void skipRound(String roundId, Instant now) {

@@ -8,6 +8,18 @@ import type {
 import { useCountdown } from '../hooks/useCountdown'
 import { CheckIcon, CrownIcon, UsersIcon } from './Icons'
 
+export function ResultRevealNotice() {
+  return (
+    <div className="result-reveal-notice" role="status">
+      <span className="closed-symbol" aria-hidden="true">✓</span>
+      <p className="eyebrow">모두 투표했어요!</p>
+      <h2>잠시 후 결과가 공개돼요</h2>
+      <p>과연 가짜는 무엇이었을까요?</p>
+      <div className="waiting-dots" aria-hidden="true"><span /><span /><span /></div>
+    </div>
+  )
+}
+
 export function RoundHeading({ round }: { round: RoundSnapshot }) {
   return (
     <div className="round-heading">
@@ -16,8 +28,9 @@ export function RoundHeading({ round }: { round: RoundSnapshot }) {
         <span>/ {String(round.total).padStart(2, '0')}</span>
       </div>
       <div>
-        <p>이번 이야기의 주인공</p>
+        <p className="round-topic">주제 · {round.topic.title}</p>
         <h2>{round.speaker.nickname}</h2>
+        <small>이번 이야기의 주인공</small>
       </div>
     </div>
   )
@@ -124,8 +137,17 @@ export function ResultPanel({ result }: { result: RoundResult }) {
             <div className="result-bar" aria-label={`${statement.vote_rate}% 득표`}>
               <span style={{ width: `${statement.vote_rate}%` }} />
             </div>
-            {statement.voters?.length ? (
-              <p className="voter-list">선택: {statement.voters.map((voter) => voter.nickname).join(', ')}</p>
+            {statement.voters ? (
+              <div className="voter-list" aria-label={`${index + 1}번 문장에 투표한 사람`} role="group">
+                <span className="voter-list__label">투표한 사람</span>
+                {statement.voters.length ? (
+                  <ul className="voter-list__badges">
+                    {statement.voters.map((voter) => (
+                      <li className="voter-badge" key={voter.id}>{voter.nickname}</li>
+                    ))}
+                  </ul>
+                ) : <span className="voter-list__empty">없음</span>}
+              </div>
             ) : null}
           </article>
         ))}

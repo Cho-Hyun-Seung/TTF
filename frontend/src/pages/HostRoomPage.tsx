@@ -7,6 +7,7 @@ import {
   Leaderboard,
   PausedNotice,
   ResultPanel,
+  ResultRevealNotice,
   RoundHeading,
   StatementCards,
   VoteProgress,
@@ -73,6 +74,7 @@ function HostLobby({
         <div>
           <strong>{snapshot.game.ready_count} / {snapshot.room.participant_count}명 준비 완료</strong>
           <p>{snapshot.room.participant_count < 2 ? '게임을 시작하려면 참가자가 2명 이상 필요해요.' : everyoneReady ? '모두 준비됐어요. 게임을 시작해 보세요!' : '아직 문장을 작성 중인 참가자가 있어요.'}</p>
+          <p className="host-topic-summary">{snapshot.game.settings.round_count}개 주제 · {snapshot.game.settings.topics.map((topic) => topic.title).join(' · ')}</p>
         </div>
         <button className="button button--primary" disabled={busy || !everyoneReady} onClick={onStart} type="button">
           <PlayIcon /> 게임 시작
@@ -113,6 +115,7 @@ function HostRound({ snapshot, action, busy }: { snapshot: TtfGameSnapshot; acti
             </>
           ) : null}
           {snapshot.game.status === 'VOTE_CLOSED' ? (
+            round.result_reveals_at ? <ResultRevealNotice /> :
             <>
               <span className="closed-symbol" aria-hidden="true">✓</span>
               <p className="eyebrow">투표 완료</p>

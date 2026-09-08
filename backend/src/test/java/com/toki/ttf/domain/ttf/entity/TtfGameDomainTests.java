@@ -8,12 +8,16 @@ import com.toki.ttf.domain.ttf.result.VoteSubmission;
 import com.toki.ttf.domain.ttf.constants.RoundStatus;
 import com.toki.ttf.domain.ttf.constants.SpeakerOrder;
 import com.toki.ttf.domain.ttf.constants.TtfGameStatus;
+import com.toki.ttf.domain.ttf.constants.TtfTopic;
 import com.toki.ttf.domain.ttf.value.LeaderboardEntry;
 import com.toki.ttf.domain.ttf.value.RoundResult;
 import com.toki.ttf.domain.ttf.value.ScoreChange;
 import com.toki.ttf.domain.ttf.value.StatementDraft;
+import com.toki.ttf.domain.ttf.value.StatementSetDraft;
 import com.toki.ttf.domain.ttf.value.TtfGameSettings;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -74,6 +78,44 @@ class TtfGameDomainTests {
                 DomainException.Code.INVALID_STATE_TRANSITION);
         assertDomainCode(() -> room.nextRound(NOW),
                 DomainException.Code.INVALID_STATE_TRANSITION);
+    }
+
+    @Test
+    void selectedTopicsCreateOneSpeakerTurnPerParticipantAndTopic() {
+        Room room = Room.create(
+                "room_topics",
+                "TOP123",
+                "Topic test room",
+                new RoomSettings(2),
+                "game_topics",
+                new TtfGameSettings(
+                        100,
+                        60,
+                        SpeakerOrder.JOIN_ORDER,
+                        true,
+                        2,
+                        List.of(TtfTopic.TRAVEL, TtfTopic.FOOD)
+                ),
+                NOW,
+                NOW.plusSeconds(3_600)
+        );
+        room.join("participant_1", "Alice", NOW);
+        room.join("participant_2", "Bob", NOW);
+
+        room.saveStatementSets("participant_1", topicDrafts("alice"), new Random(1), NOW);
+        assertThat(room.activeGame().status()).isEqualTo(TtfGameStatus.SUBMISSION);
+        room.saveStatementSets("participant_2", topicDrafts("bob"), new Random(2), NOW);
+        assertThat(room.activeGame().status()).isEqualTo(TtfGameStatus.READY);
+
+        room.startGame(new Random(3), NOW);
+
+        assertThat(room.activeGame().roundCount()).isEqualTo(4);
+        assertThat(room.activeGame().rounds()).extracting(Round::topic)
+                .containsExactly(TtfTopic.TRAVEL, TtfTopic.TRAVEL, TtfTopic.FOOD, TtfTopic.FOOD);
+        assertThat(room.activeGame().rounds()).extracting(Round::speakerParticipantId)
+                .containsExactly("participant_1", "participant_2", "participant_1", "participant_2");
+        assertThat(room.activeGame().rounds()).allSatisfy(round ->
+                assertThat(round.statements()).allMatch(statement -> statement.topic() == round.topic()));
     }
 
     @Test
@@ -208,7 +250,7 @@ class TtfGameDomainTests {
     }
 
     @Test
-    void revealIsIdempotentAndFinishUsesOnlyCorrectVoteScoresWithCompetitionRanks() {
+    void revealIsIdempotentAndFinishUsesCompetitionRanks() {
         Room room = readyRoom(3);
         room.startGame(new Random(1), NOW);
         Round round = currentRound(room);
@@ -216,7 +258,6 @@ class TtfGameDomainTests {
         Statement fake = fakeStatement(round);
         room.submitVote("participant_2", round.id(), fake.id(), NOW.plusSeconds(1));
         room.submitVote("participant_3", round.id(), fake.id(), NOW.plusSeconds(1));
-        room.closeVoting(round.id(), NOW.plusSeconds(2));
 
         RoundResult firstResult = room.revealResult(round.id(), NOW.plusSeconds(3));
         long versionAfterReveal = room.version();
@@ -245,6 +286,38 @@ class TtfGameDomainTests {
                         new LeaderboardEntry("participant_3", 1, 1),
                         new LeaderboardEntry("participant_1", 0, 3)
                 );
+    }
+
+    @Test
+    void speakerEarnsOnePointForEachFooledParticipant() {
+        Room room = readyRoom(4);
+        room.startGame(new Random(1), NOW);
+        Round round = currentRound(room);
+        room.startVoting(round.id(), NOW);
+        Statement fake = fakeStatement(round);
+        Statement truth = round.statements().stream()
+                .filter(statement -> !statement.fake())
+                .findFirst()
+                .orElseThrow();
+
+        room.submitVote("participant_2", round.id(), fake.id(), NOW.plusSeconds(1));
+        room.submitVote("participant_3", round.id(), truth.id(), NOW.plusSeconds(1));
+        room.submitVote("participant_4", round.id(), truth.id(), NOW.plusSeconds(1));
+
+        RoundResult result = room.revealResult(round.id(), NOW.plusSeconds(3));
+        assertThat(result.correctVoterCount()).isEqualTo(1);
+        assertThat(result.fooledParticipantCount()).isEqualTo(2);
+        assertThat(result.scoreChanges()).containsExactly(
+                new ScoreChange("participant_2", 1, 1),
+                new ScoreChange("participant_1", 2, 2)
+        );
+        assertThat(score(room, "participant_1")).isEqualTo(2);
+        assertThat(score(room, "participant_2")).isEqualTo(1);
+        assertThat(score(room, "participant_3")).isZero();
+        assertThat(score(room, "participant_4")).isZero();
+
+        assertThat(room.revealResult(round.id(), NOW.plusSeconds(4))).isEqualTo(result);
+        assertThat(score(room, "participant_1")).isEqualTo(2);
     }
 
     @Test
@@ -293,9 +366,10 @@ class TtfGameDomainTests {
         assertThat(room.closeVotingIfDue(round.id(), NOW.plusSeconds(140))).isTrue();
     }
 
-    @Test
-    void concurrentVotesAreAtomicAndRemainOnePerEligibleParticipant() throws Exception {
-        Room room = readyRoom(100);
+    @ParameterizedTest
+    @ValueSource(ints = {30, 100})
+    void concurrentVotesAreAtomicAndCloseExactlyOnce(int participantCount) throws Exception {
+        Room room = readyRoom(participantCount);
         room.startGame(new Random(1), NOW);
         Round round = currentRound(room);
         room.startVoting(round.id(), NOW);
@@ -317,19 +391,95 @@ class TtfGameDomainTests {
                 }));
             }
             start.countDown();
+            int closedCount = 0;
             for (Future<VoteSubmission> future : futures) {
-                assertThat(future.get(10, TimeUnit.SECONDS))
-                        .isEqualTo(new VoteSubmission(true, true, false));
+                VoteSubmission submission = future.get(10, TimeUnit.SECONDS);
+                assertThat(submission.changed()).isTrue();
+                assertThat(submission.firstVote()).isTrue();
+                if (submission.votingClosed()) {
+                    closedCount++;
+                }
             }
+            assertThat(closedCount).isEqualTo(1);
         } finally {
             executor.shutdownNow();
             assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
         }
 
-        assertThat(round.votes()).hasSize(99);
+        assertThat(round.votes()).hasSize(participantCount - 1);
         assertThat(round.votes()).extracting(Vote::voterParticipantId).doesNotHaveDuplicates();
-        assertThat(room.version()).isEqualTo(versionBeforeVotes + 99);
-        assertThat(room.activeGame().status()).isEqualTo(TtfGameStatus.VOTING);
+        assertThat(room.version()).isEqualTo(versionBeforeVotes + participantCount - 1);
+        assertThat(room.activeGame().status()).isEqualTo(TtfGameStatus.VOTE_CLOSED);
+        assertThat(room.revealResultIfDue(round.id(), NOW.plusSeconds(3))).isTrue();
+        assertThat(round.result().orElseThrow().correctVoterCount()).isEqualTo(participantCount - 1);
+    }
+
+    @Test
+    void lastVoteClosesVotingAndRevealsOnlyOnceAfterTwoSeconds() {
+        Room room = readyRoom(3);
+        room.startGame(new Random(1), NOW);
+        Round round = currentRound(room);
+        room.startVoting(round.id(), NOW);
+        String fakeId = fakeStatement(round).id();
+        room.submitVote("participant_2", round.id(), fakeId, NOW.plusSeconds(1));
+        assertThat(round.resultRevealsAt()).isNull();
+        assertThat(room.revealResultIfDue(round.id(), NOW.plusSeconds(2))).isFalse();
+
+        Instant lastVoteAt = round.votingEndsAt().minusMillis(1);
+        assertThat(room.submitVote("participant_3", round.id(), fakeId, lastVoteAt))
+                .isEqualTo(new VoteSubmission(true, true, true));
+        Instant revealsAt = lastVoteAt.plusSeconds(2);
+        assertThat(round.resultRevealsAt()).isEqualTo(revealsAt);
+        assertThat(round.result()).isEmpty();
+        assertThat(score(room, "participant_2")).isZero();
+        assertThat(room.closeVotingIfDue(round.id(), round.votingEndsAt())).isFalse();
+        assertDomainCode(() -> room.submitVote("participant_3", round.id(), fakeId, lastVoteAt),
+                DomainException.Code.VOTING_NOT_OPEN);
+        assertDomainCode(() -> room.revealResult(round.id(), revealsAt.minusMillis(1)),
+                DomainException.Code.INVALID_STATE_TRANSITION);
+        assertThat(room.revealResultIfDue("stale_round", revealsAt)).isFalse();
+        assertThat(room.revealResultIfDue(round.id(), revealsAt.minusMillis(1))).isFalse();
+        assertThat(room.revealResultIfDue(round.id(), revealsAt)).isTrue();
+        long revealedVersion = room.version();
+        assertThat(room.revealResultIfDue(round.id(), revealsAt.plusSeconds(1))).isFalse();
+        assertThat(room.version()).isEqualTo(revealedVersion);
+        assertThat(score(room, "participant_2")).isEqualTo(1);
+        assertThat(score(room, "participant_3")).isEqualTo(1);
+        room.nextRound(revealsAt.plusSeconds(1));
+        assertThat(room.revealResultIfDue(round.id(), revealsAt.plusSeconds(2))).isFalse();
+    }
+
+    @Test
+    void automaticRevealPreservesRemainingDelayAcrossPauseAndResume() {
+        Room room = readyRoom(3);
+        room.startGame(new Random(1), NOW);
+        Round round = currentRound(room);
+        room.startVoting(round.id(), NOW);
+        String fakeId = fakeStatement(round).id();
+        room.submitVote("participant_2", round.id(), fakeId, NOW.plusSeconds(1));
+        room.submitVote("participant_3", round.id(), fakeId, NOW.plusSeconds(1));
+        room.pause(NOW.plusSeconds(2));
+        assertThat(room.revealResultIfDue(round.id(), NOW.plusSeconds(10))).isFalse();
+        assertThat(round.result()).isEmpty();
+
+        room.resume(NOW.plusSeconds(20));
+        assertThat(round.resultRevealsAt()).isEqualTo(NOW.plusSeconds(21));
+        assertThat(room.revealResultIfDue(round.id(), NOW.plusSeconds(20))).isFalse();
+        assertThat(room.revealResultIfDue(round.id(), NOW.plusSeconds(21))).isTrue();
+    }
+
+    @Test
+    void finishingDuringRevealDelayPreventsLateScoring() {
+        Room room = readyRoom(3);
+        room.startGame(new Random(1), NOW);
+        Round round = currentRound(room);
+        room.startVoting(round.id(), NOW);
+        String fakeId = fakeStatement(round).id();
+        room.submitVote("participant_2", round.id(), fakeId, NOW.plusSeconds(1));
+        room.submitVote("participant_3", round.id(), fakeId, NOW.plusSeconds(1));
+        room.finish(NOW.plusSeconds(2));
+        assertThat(room.revealResultIfDue(round.id(), NOW.plusSeconds(3))).isFalse();
+        assertThat(room.activeGame().leaderboard()).extracting(LeaderboardEntry::score).containsOnly(0);
     }
 
     private static Room newRoom(int maxParticipants) {
@@ -361,6 +511,13 @@ class TtfGameDomainTests {
                 new StatementDraft(prefix + " first truth", false),
                 new StatementDraft(prefix + " second fake", true),
                 new StatementDraft(prefix + " third truth", false)
+        );
+    }
+
+    private static List<StatementSetDraft> topicDrafts(String prefix) {
+        return List.of(
+                new StatementSetDraft(TtfTopic.TRAVEL, drafts(prefix + " travel")),
+                new StatementSetDraft(TtfTopic.FOOD, drafts(prefix + " food"))
         );
     }
 

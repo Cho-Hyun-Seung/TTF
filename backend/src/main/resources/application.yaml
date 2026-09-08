@@ -2,6 +2,9 @@ spring:
   application:
     name: ttf
 
+server:
+  port: ${SERVER_PORT:8081}
+
 ttf:
   frontend-base-url: ${TTF_FRONTEND_BASE_URL:http://localhost:5173}
   cookie:

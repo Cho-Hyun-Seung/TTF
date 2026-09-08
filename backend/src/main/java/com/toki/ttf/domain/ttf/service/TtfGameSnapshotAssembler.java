@@ -12,6 +12,7 @@ import com.toki.ttf.domain.ttf.entity.TtfGame;
 import com.toki.ttf.domain.ttf.entity.TtfPlayer;
 import com.toki.ttf.domain.ttf.constants.SnapshotAudience;
 import com.toki.ttf.domain.ttf.constants.TtfGameStatus;
+import com.toki.ttf.domain.ttf.constants.TtfTopic;
 import com.toki.ttf.domain.ttf.value.LeaderboardEntry;
 import com.toki.ttf.domain.ttf.value.RoundResult;
 import com.toki.ttf.domain.ttf.value.ScoreChange;
@@ -43,8 +44,10 @@ public class TtfGameSnapshotAssembler {
             List<TtfGameSnapshotResponse.ParticipantSummary> participants = audience == SnapshotAudience.HOST
                     ? participants(room, game)
                     : null;
-            List<TtfGameSnapshotResponse.MyStatement> myStatements = includeMyStatements(game, audience)
-                    ? game.statementsFor(viewerParticipantId).stream().map(this::myStatement).toList()
+            List<TtfGameSnapshotResponse.MyStatementSet> myStatementSets = includeMyStatements(game, audience)
+                    ? game.settings().topics().stream()
+                            .map(topic -> myStatementSet(game, viewerParticipantId, topic))
+                            .toList()
                     : null;
             TtfGameSnapshotResponse.RoundSnapshot currentRound = game.currentRound()
                     .map(round -> round(room, game, round, audience, viewerParticipantId))
@@ -76,12 +79,14 @@ public class TtfGameSnapshotAssembler {
                                     enumValue(
                                             TtfGameSnapshotResponse.SpeakerOrder.class,
                                             game.settings().speakerOrder().name()),
-                                    game.settings().anonymousVoting()
+                                    game.settings().anonymousVoting(),
+                                    game.settings().roundCount(),
+                                    game.settings().topics().stream().map(this::topic).toList()
                             )
                     ),
                     viewer,
                     participants,
-                    myStatements,
+                    myStatementSets,
                     currentRound,
                     leaderboard
             );
@@ -158,10 +163,12 @@ public class TtfGameSnapshotAssembler {
                 round.id(),
                 round.number(),
                 game.roundCount(),
+                topic(round.topic()),
                 person(speaker),
                 statements,
                 round.votingStartedAt(),
                 round.votingEndsAt(),
+                game.status() == TtfGameStatus.VOTE_CLOSED ? round.resultRevealsAt() : null,
                 new TtfGameSnapshotResponse.VoteProgress(
                         round.votes().size(),
                         game.eligibleVoterCount()
@@ -251,6 +258,21 @@ public class TtfGameSnapshotAssembler {
     private TtfGameSnapshotResponse.MyStatement myStatement(Statement statement) {
         return new TtfGameSnapshotResponse.MyStatement(
                 statement.id(), statement.content(), statement.fake());
+    }
+
+    private TtfGameSnapshotResponse.MyStatementSet myStatementSet(
+            TtfGame game,
+            String participantId,
+            TtfTopic topic
+    ) {
+        return new TtfGameSnapshotResponse.MyStatementSet(
+                topic(topic),
+                game.statementsFor(participantId, topic).stream().map(this::myStatement).toList()
+        );
+    }
+
+    private TtfGameSnapshotResponse.Topic topic(TtfTopic topic) {
+        return new TtfGameSnapshotResponse.Topic(topic.name(), topic.title(), topic.example());
     }
 
     private TtfGameSnapshotResponse.Person person(Participant participant) {

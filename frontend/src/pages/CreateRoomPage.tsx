@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell, StepLabel } from '../components/AppShell'
 import { InlineError } from '../components/Feedback'
 import { ArrowRightIcon } from '../components/Icons'
-import { ApiError, roomApi } from '../lib/api'
+import { ApiError, roomApi, ttfGameApi } from '../lib/api'
+import type { TtfTopic } from '../domain/types'
 
 export function CreateRoomPage() {
   const navigate = useNavigate()
@@ -12,9 +13,66 @@ export function CreateRoomPage() {
   const [statementMaxLength, setStatementMaxLength] = useState(100)
   const [votingDuration, setVotingDuration] = useState(60)
   const [speakerOrder, setSpeakerOrder] = useState<'RANDOM' | 'JOIN_ORDER'>('RANDOM')
-  const [anonymousVoting, setAnonymousVoting] = useState(true)
+  const [showVoters, setShowVoters] = useState(false)
+  const [roundCount, setRoundCount] = useState(3)
+  const [topics, setTopics] = useState<TtfTopic[]>([])
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([])
+  const [topicsLoading, setTopicsLoading] = useState(true)
+  const [topicsError, setTopicsError] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  const retryTopics = () => {
+    setTopicsLoading(true)
+    setTopicsError('')
+    void ttfGameApi.getTopics()
+      .then((catalog) => {
+        setTopics(catalog)
+        setSelectedTopicIds(catalog.slice(0, roundCount).map((topic) => topic.id))
+      })
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === 'AbortError') return
+        setTopicsError('주제 목록을 불러오지 못했어요. 다시 시도해 주세요.')
+      })
+      .finally(() => setTopicsLoading(false))
+  }
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void ttfGameApi.getTopics(controller.signal)
+      .then((catalog) => {
+        setTopics(catalog)
+        setSelectedTopicIds(catalog.slice(0, 3).map((topic) => topic.id))
+      })
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === 'AbortError') return
+        setTopicsError('주제 목록을 불러오지 못했어요. 다시 시도해 주세요.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setTopicsLoading(false)
+      })
+    return () => controller.abort()
+  }, [])
+
+  const changeRoundCount = (nextCount: number) => {
+    setRoundCount(nextCount)
+    if (!Number.isInteger(nextCount) || nextCount < 1 || nextCount > topics.length) return
+    setSelectedTopicIds((current) => {
+      const retained = current.filter((id) => topics.some((topic) => topic.id === id)).slice(0, nextCount)
+      const additions = topics
+        .filter((topic) => !retained.includes(topic.id))
+        .slice(0, nextCount - retained.length)
+        .map((topic) => topic.id)
+      return [...retained, ...additions]
+    })
+  }
+
+  const toggleTopic = (topicId: string) => {
+    setSelectedTopicIds((current) => {
+      if (current.includes(topicId)) return current.filter((id) => id !== topicId)
+      return current.length < roundCount ? [...current, topicId] : current
+    })
+  }
 
   const create = async (event: FormEvent) => {
     event.preventDefault()
@@ -35,6 +93,14 @@ export function CreateRoomPage() {
       setError('문장 최대 길이는 20~200자로 설정해 주세요.')
       return
     }
+    if (!Number.isInteger(roundCount) || roundCount < 1 || roundCount > topics.length) {
+      setError(`라운드 수는 1~${topics.length || 8}개로 설정해 주세요.`)
+      return
+    }
+    if (selectedTopicIds.length !== roundCount) {
+      setError(`라운드 주제를 ${roundCount}개 선택해 주세요.`)
+      return
+    }
     setBusy(true)
     try {
       const created = await roomApi.create({
@@ -48,7 +114,9 @@ export function CreateRoomPage() {
             statement_max_length: statementMaxLength,
             voting_duration_seconds: votingDuration,
             speaker_order: speakerOrder,
-            anonymous_voting: anonymousVoting,
+            anonymous_voting: !showVoters,
+            round_count: roundCount,
+            topic_ids: selectedTopicIds,
           },
         },
       })
@@ -93,10 +161,47 @@ export function CreateRoomPage() {
             </div>
           </div>
 
-          <div className="field-group">
-            <label htmlFor="statement-length">문장 최대 길이</label>
-            <div className="input-suffix"><input id="statement-length" max={200} min={20} onChange={(event) => setStatementMaxLength(event.target.valueAsNumber)} required step={10} type="number" value={statementMaxLength} /><span>자</span></div>
+          <div className="field-row">
+            <div className="field-group">
+              <label htmlFor="statement-length">문장 최대 길이</label>
+              <div className="input-suffix"><input id="statement-length" max={200} min={20} onChange={(event) => setStatementMaxLength(event.target.valueAsNumber)} required step={10} type="number" value={statementMaxLength} /><span>자</span></div>
+            </div>
+            <div className="field-group">
+              <label htmlFor="round-count">주제 라운드 수</label>
+              <div className="input-suffix"><input id="round-count" max={topics.length || 8} min={1} onChange={(event) => changeRoundCount(event.target.valueAsNumber)} required type="number" value={roundCount} /><span>개</span></div>
+            </div>
           </div>
+
+          <fieldset className="topic-options">
+            <legend>라운드 주제</legend>
+            <p>참가자 모두가 선택된 주제마다 세 문장을 준비해요. {selectedTopicIds.length} / {roundCount}개 선택</p>
+            {topicsLoading ? <p className="topic-options__state" role="status">주제를 불러오는 중…</p> : null}
+            {topicsError ? (
+              <div className="topic-options__state">
+                <span>{topicsError}</span>
+                <button className="text-button" onClick={retryTopics} type="button">다시 불러오기</button>
+              </div>
+            ) : null}
+            {topics.length ? (
+              <div className="topic-grid">
+                {topics.map((topic) => {
+                  const selected = selectedTopicIds.includes(topic.id)
+                  const selectionFull = selectedTopicIds.length >= roundCount
+                  return (
+                    <label className="topic-card" key={topic.id}>
+                      <input
+                        checked={selected}
+                        disabled={!selected && selectionFull}
+                        onChange={() => toggleTopic(topic.id)}
+                        type="checkbox"
+                      />
+                      <span><strong>{topic.title}</strong><small>{topic.example}</small></span>
+                    </label>
+                  )
+                })}
+              </div>
+            ) : null}
+          </fieldset>
 
           <fieldset className="option-group">
             <legend>발표 순서</legend>
@@ -105,12 +210,12 @@ export function CreateRoomPage() {
           </fieldset>
 
           <label className="switch-row">
-            <span><strong>익명 투표</strong><small>결과에 누가 무엇을 골랐는지 숨겨요</small></span>
-            <input checked={anonymousVoting} onChange={(event) => setAnonymousVoting(event.target.checked)} role="switch" type="checkbox" />
+            <span><strong>투표자 공개</strong><small>결과에서 각 문장 아래에 투표한 사람을 배지로 보여줘요</small></span>
+            <input checked={showVoters} onChange={(event) => setShowVoters(event.target.checked)} role="switch" type="checkbox" />
           </label>
 
           {error ? <InlineError>{error}</InlineError> : null}
-          <button className="button button--primary button--block" disabled={busy} type="submit">
+          <button className="button button--primary button--block" disabled={busy || topicsLoading || Boolean(topicsError)} type="submit">
             {busy ? '게임방 만드는 중…' : <>게임방 만들기 <ArrowRightIcon /></>}
           </button>
         </form>

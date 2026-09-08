@@ -1,6 +1,9 @@
 package com.toki.ttf;
 
 import com.jayway.jsonpath.JsonPath;
+import com.toki.ttf.domain.room.repository.RoomRepository;
+import com.toki.ttf.domain.ttf.constants.TtfGameStatus;
+import com.toki.ttf.infrastructure.scheduling.VotingScheduler;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +21,7 @@ import org.springframework.web.context.WebApplicationContext;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -42,6 +46,12 @@ class TtfApiContractIntegrationTests {
 
     @Autowired
     private WebApplicationContext applicationContext;
+
+    @Autowired
+    private RoomRepository roomRepository;
+
+    @Autowired
+    private VotingScheduler votingScheduler;
 
     private MockMvc mockMvc;
 
@@ -153,28 +163,34 @@ class TtfApiContractIntegrationTests {
 
         saveStatements(room, first, """
                 {
-                  "statements": [
-                    {"content": "나는 사막에서 밤을 보낸 적이 있다.", "is_fake": false},
-                    {"content": "나는 커피를 한 번도 마신 적이 없다.", "is_fake": true},
-                    {"content": "나는 세 개의 악기를 연주할 수 있다.", "is_fake": false}
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "나는 사막에서 밤을 보낸 적이 있다.", "is_fake": false},
+                      {"content": "나는 커피를 한 번도 마신 적이 없다.", "is_fake": true},
+                      {"content": "나는 세 개의 악기를 연주할 수 있다.", "is_fake": false}
+                    ]}
                   ]
                 }
                 """);
         saveStatements(room, second, """
                 {
-                  "statements": [
-                    {"content": "나는 새벽 기차로 여행한 적이 있다.", "is_fake": false},
-                    {"content": "나는 열기구를 직접 조종한 적이 있다.", "is_fake": true},
-                    {"content": "나는 겨울 바다에서 수영한 적이 있다.", "is_fake": false}
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "나는 새벽 기차로 여행한 적이 있다.", "is_fake": false},
+                      {"content": "나는 열기구를 직접 조종한 적이 있다.", "is_fake": true},
+                      {"content": "나는 겨울 바다에서 수영한 적이 있다.", "is_fake": false}
+                    ]}
                   ]
                 }
                 """);
         saveStatements(room, third, """
                 {
-                  "statements": [
-                    {"content": "나는 직접 빵을 구워 본 적이 있다.", "is_fake": false},
-                    {"content": "나는 우주 센터에서 일한 적이 있다.", "is_fake": true},
-                    {"content": "나는 혼자 제주도를 여행한 적이 있다.", "is_fake": false}
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "나는 직접 빵을 구워 본 적이 있다.", "is_fake": false},
+                      {"content": "나는 우주 센터에서 일한 적이 있다.", "is_fake": true},
+                      {"content": "나는 혼자 제주도를 여행한 적이 있다.", "is_fake": false}
+                    ]}
                   ]
                 }
                 """);
@@ -206,8 +222,8 @@ class TtfApiContractIntegrationTests {
 
         List<Map<String, Object>> leaderboard = readList(finished, "$.data.leaderboard");
         assertLeaderboardEntry(leaderboard, first.id(), 0, 3, false);
-        assertLeaderboardEntry(leaderboard, second.id(), 1, 1, false);
-        assertLeaderboardEntry(leaderboard, third.id(), 1, 1, false);
+        assertLeaderboardEntry(leaderboard, second.id(), 3, 1, false);
+        assertLeaderboardEntry(leaderboard, third.id(), 3, 1, false);
     }
 
     @Test
@@ -280,10 +296,12 @@ class TtfApiContractIntegrationTests {
 
         String invalidStatements = """
                 {
-                  "statements": [
-                    {"content": "첫 번째 진짜 문장입니다.", "is_fake": false},
-                    {"content": "두 번째 진짜 문장입니다.", "is_fake": false},
-                    {"content": "세 번째 진짜 문장입니다.", "is_fake": false}
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "첫 번째 진짜 문장입니다.", "is_fake": false},
+                      {"content": "두 번째 진짜 문장입니다.", "is_fake": false},
+                      {"content": "세 번째 진짜 문장입니다.", "is_fake": false}
+                    ]}
                   ]
                 }
                 """;
@@ -292,6 +310,85 @@ class TtfApiContractIntegrationTests {
                         .cookie(participant.session())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalidStatements))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error_code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void topicCatalogAndSelectedTopicRoundsAreServerAuthoritative() throws Exception {
+        MvcResult catalog = mockMvc.perform(get("/api/v1/games/ttf/topics"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.length()").value(8))
+                .andExpect(jsonPath("$.data[0].id").value("TRAVEL"))
+                .andExpect(jsonPath("$.data[0].title").value("여행"))
+                .andExpect(jsonPath("$.data[0].example").isString())
+                .andReturn();
+        assertThat(catalog.getResponse().getContentAsString())
+                .doesNotContain("학교", "직장", "아무도 모르는 경험");
+
+        MvcResult created = performCreateRoom("""
+                {
+                  "name": "주제 라운드",
+                  "settings": {"max_participants": 3},
+                  "game": {
+                    "type": "TTF",
+                    "settings": {
+                      "statement_max_length": 100,
+                      "voting_duration_seconds": 60,
+                      "speaker_order": "JOIN_ORDER",
+                      "anonymous_voting": true,
+                      "round_count": 2,
+                      "topic_ids": ["TRAVEL", "FOOD"]
+                    }
+                  }
+                }
+                """, idempotencyKey(), null);
+        String gameId = read(created, "$.data.game.id", String.class);
+        String roomId = read(created, "$.data.room.id", String.class);
+        String code = read(created, "$.data.room.code", String.class);
+        Cookie hostSession = requireSessionCookie(created, HOST_COOKIE);
+        CreatedRoom topicRoom = new CreatedRoom(roomId, code, gameId, hostSession);
+
+        MvcResult snapshot = getSnapshot(gameId, "host", hostSession);
+        assertThat(read(snapshot, "$.game.settings.round_count", Number.class).intValue()).isEqualTo(2);
+        assertThat(readStringList(snapshot, "$.game.settings.topics[*].id"))
+                .containsExactly("TRAVEL", "FOOD");
+
+        Participant first = join(topicRoom, "첫째");
+        Participant second = join(topicRoom, "둘째");
+        saveStatements(topicRoom, first, validStatementsForTwoTopics("첫째"));
+        saveStatements(topicRoom, second, validStatementsForTwoTopics("둘째"));
+
+        MvcResult participantSnapshot = getSnapshot(gameId, "participant", first.session());
+        assertThat(readStringList(participantSnapshot, "$.my_statement_sets[*].topic.id"))
+                .containsExactly("TRAVEL", "FOOD");
+        command("/api/v1/games/ttf/%s/commands/start".formatted(gameId), hostSession);
+        MvcResult started = getSnapshot(gameId, "host", hostSession);
+        assertThat(read(started, "$.game.round_count", Number.class).intValue()).isEqualTo(4);
+        assertThat(read(started, "$.current_round.topic.id", String.class)).isEqualTo("TRAVEL");
+
+        String mismatchedTopics = """
+                {
+                  "name": "잘못된 주제 라운드",
+                  "settings": {"max_participants": 3},
+                  "game": {
+                    "type": "TTF",
+                    "settings": {
+                      "statement_max_length": 100,
+                      "voting_duration_seconds": 60,
+                      "speaker_order": "JOIN_ORDER",
+                      "anonymous_voting": true,
+                      "round_count": 2,
+                      "topic_ids": ["TRAVEL"]
+                    }
+                  }
+                }
+                """;
+        mockMvc.perform(write(post("/api/v1/rooms"))
+                        .header("Idempotency-Key", idempotencyKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mismatchedTopics))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error_code").value("VALIDATION_ERROR"));
     }
@@ -411,6 +508,16 @@ class TtfApiContractIntegrationTests {
         assertThat(read(getSnapshot(room.gameId(), "host", room.hostSession()),
                 "$.game.status", String.class)).isEqualTo("VOTING");
 
+        command("/api/v1/games/ttf/%s/rounds/%s/commands/close-voting"
+                .formatted(room.gameId(), roundId), room.hostSession());
+        String revealPath = "/api/v1/games/ttf/%s/rounds/%s/commands/reveal-result"
+                .formatted(room.gameId(), roundId);
+        String revealKey = idempotencyKey();
+        command(revealPath, room.hostSession(), revealKey);
+        command(revealPath, room.hostSession(), revealKey);
+        assertThat(read(getSnapshot(room.gameId(), "host", room.hostSession()),
+                "$.game.status", String.class)).isEqualTo("RESULT");
+
         String finishKey = idempotencyKey();
         String finishPath = "/api/v1/games/ttf/%s/commands/finish".formatted(room.gameId());
         command(finishPath, room.hostSession(), finishKey);
@@ -511,10 +618,12 @@ class TtfApiContractIntegrationTests {
 
         String duplicates = """
                 {
-                  "statements": [
-                    {"content": "나는 같은 문장을 작성했습니다.", "is_fake": false},
-                    {"content": "  나는   같은 문장을 작성했습니다.  ", "is_fake": true},
-                    {"content": "나는 전혀 다른 문장을 작성했습니다.", "is_fake": false}
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "나는 같은 문장을 작성했습니다.", "is_fake": false},
+                      {"content": "  나는   같은 문장을 작성했습니다.  ", "is_fake": true},
+                      {"content": "나는 전혀 다른 문장을 작성했습니다.", "is_fake": false}
+                    ]}
                   ]
                 }
                 """;
@@ -522,10 +631,12 @@ class TtfApiContractIntegrationTests {
 
         String twoFakes = """
                 {
-                  "statements": [
-                    {"content": "나는 첫 번째 문장을 작성했습니다.", "is_fake": true},
-                    {"content": "나는 두 번째 문장을 작성했습니다.", "is_fake": true},
-                    {"content": "나는 세 번째 문장을 작성했습니다.", "is_fake": false}
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "나는 첫 번째 문장을 작성했습니다.", "is_fake": true},
+                      {"content": "나는 두 번째 문장을 작성했습니다.", "is_fake": true},
+                      {"content": "나는 세 번째 문장을 작성했습니다.", "is_fake": false}
+                    ]}
                   ]
                 }
                 """;
@@ -533,7 +644,7 @@ class TtfApiContractIntegrationTests {
 
         MvcResult snapshot = getSnapshot(room.gameId(), "participant", participant.session());
         assertThat(read(snapshot, "$.viewer.is_ready", Boolean.class)).isFalse();
-        assertThat(readList(snapshot, "$.my_statements")).isEmpty();
+        assertThat(readList(snapshot, "$.my_statement_sets[0].statements")).isEmpty();
     }
 
     @Test
@@ -555,11 +666,7 @@ class TtfApiContractIntegrationTests {
         assertPreRevealSafe(getSnapshot(room.gameId(), "display", null));
         assertPreRevealSafe(getSnapshot(room.gameId(), "host", room.hostSession()));
 
-        command("/api/v1/games/ttf/%s/rounds/%s/commands/close-voting"
-                .formatted(room.gameId(), roundId), room.hostSession());
-        assertPreRevealSafe(getSnapshot(room.gameId(), "display", null));
-        command("/api/v1/games/ttf/%s/rounds/%s/commands/reveal-result"
-                .formatted(room.gameId(), roundId), room.hostSession());
+        awaitAutomaticResult(room.gameId());
 
         MvcResult result = getSnapshot(room.gameId(), "display", null);
         List<Map<String, Object>> statementResults = readList(result, "$.current_round.result.statements");
@@ -570,6 +677,27 @@ class TtfApiContractIntegrationTests {
         assertThat(voters.get(0))
                 .containsEntry("id", voter.id())
                 .containsEntry("nickname", voter.nickname());
+    }
+
+    @Test
+    void anonymousVotingKeepsVotersHiddenAfterResultReveal() throws Exception {
+        ReadyRoom ready = readyRoom("비공개 투표", true);
+        CreatedRoom room = ready.room();
+        Participant speaker = ready.first();
+        String fakeStatementId = ownFakeStatementId(room, speaker);
+
+        command("/api/v1/games/ttf/%s/commands/start".formatted(room.gameId()), room.hostSession());
+        MvcResult intro = getSnapshot(room.gameId(), "display", null);
+        String roundId = read(intro, "$.current_round.id", String.class);
+        command("/api/v1/games/ttf/%s/rounds/%s/commands/start-voting"
+                .formatted(room.gameId(), roundId), room.hostSession());
+        submitVote(room.gameId(), roundId, ready.second().session(), fakeStatementId);
+
+        awaitAutomaticResult(room.gameId());
+
+        MvcResult result = getSnapshot(room.gameId(), "display", null);
+        assertThat(read(result, "$.game.status", String.class)).isEqualTo("RESULT");
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("\"voters\"");
     }
 
     @Test
@@ -728,7 +856,7 @@ class TtfApiContractIntegrationTests {
     private String ownFakeStatementId(CreatedRoom room, Participant participant) throws Exception {
         MvcResult snapshot = getSnapshot(room.gameId(), "participant", participant.session());
         List<String> fakeIds = readStringList(snapshot,
-                "$.my_statements[?(@.is_fake == true)].id");
+                "$.my_statement_sets[0].statements[?(@.is_fake == true)].id");
         assertThat(fakeIds).hasSize(1);
         return fakeIds.get(0);
     }
@@ -775,7 +903,8 @@ class TtfApiContractIntegrationTests {
         submitVote(room.gameId(), roundId, voters.get(1).session(), selectedStatementId);
 
         MvcResult voting = getSnapshot(room.gameId(), "participant", voters.get(0).session());
-        assertThat(read(voting, "$.game.status", String.class)).isEqualTo("VOTING");
+        assertThat(read(voting, "$.game.status", String.class)).isEqualTo("VOTE_CLOSED");
+        assertThat(read(voting, "$.current_round.result_reveals_at", String.class)).isNotBlank();
         assertThat(read(voting, "$.current_round.vote_progress.completed", Number.class).intValue()).isEqualTo(2);
         assertThat(read(voting, "$.current_round.vote_progress.eligible", Number.class).intValue()).isEqualTo(2);
         assertThat(read(voting, "$.current_round.my_vote_statement_id", String.class)).isEqualTo(selectedStatementId);
@@ -783,19 +912,18 @@ class TtfApiContractIntegrationTests {
         assertPreRevealSafe(getSnapshot(room.gameId(), "host", room.hostSession()));
         assertPreRevealSafe(getSnapshot(room.gameId(), "display", null));
 
-        command("/api/v1/games/ttf/%s/rounds/%s/commands/close-voting".formatted(room.gameId(), roundId),
-                room.hostSession());
         MvcResult closed = getSnapshot(room.gameId(), "display", null);
         assertThat(read(closed, "$.game.status", String.class)).isEqualTo("VOTE_CLOSED");
         assertPreRevealSafe(closed);
         assertPreRevealSafe(getSnapshot(room.gameId(), "host", room.hostSession()));
 
-        String revealKey = idempotencyKey();
-        command("/api/v1/games/ttf/%s/rounds/%s/commands/reveal-result".formatted(room.gameId(), roundId),
-                room.hostSession(), revealKey);
+        mockMvc.perform(write(put("/api/v1/games/ttf/{gameId}/rounds/{roundId}/vote", room.gameId(), roundId))
+                        .cookie(voters.get(1).session())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"statement_id\":\"%s\"}".formatted(selectedStatementId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("VOTING_NOT_OPEN"));
         if (roundNumber == 1) {
-            command("/api/v1/games/ttf/%s/rounds/%s/commands/reveal-result".formatted(room.gameId(), roundId),
-                    room.hostSession(), revealKey);
             mockMvc.perform(write(post(
                                     "/api/v1/games/ttf/{gameId}/rounds/{roundId}/commands/reveal-result",
                                     room.gameId(),
@@ -804,22 +932,99 @@ class TtfApiContractIntegrationTests {
                             .header("Idempotency-Key", idempotencyKey()))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.error_code").value("INVALID_STATE_TRANSITION"));
+            mockMvc.perform(write(post(
+                                    "/api/v1/games/ttf/{gameId}/rounds/{roundId}/commands/reveal-result",
+                                    room.gameId(), roundId))
+                            .cookie(voters.get(0).session())
+                            .header("Idempotency-Key", idempotencyKey()))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.error_code").value("HOST_PERMISSION_REQUIRED"));
         }
 
+        awaitAutomaticResult(room.gameId());
         MvcResult result = getSnapshot(room.gameId(), "display", null);
         assertThat(read(result, "$.game.status", String.class)).isEqualTo("RESULT");
         assertThat(read(result, "$.current_round.result.fake_statement_id", String.class))
                 .isEqualTo(knownFakeStatementId);
         int expectedCorrect = voteForFake ? 2 : 0;
+        int expectedFooled = voters.size() - expectedCorrect;
         assertThat(read(result, "$.current_round.result.correct_voter_count", Number.class).intValue())
                 .isEqualTo(expectedCorrect);
+        assertThat(read(result, "$.current_round.result.fooled_participant_count", Number.class).intValue())
+                .isEqualTo(expectedFooled);
 
         List<Map<String, Object>> statementResults = readList(result, "$.current_round.result.statements");
         Map<String, Object> fakeResult = entryBy(statementResults, "id", knownFakeStatementId);
         assertThat(number(fakeResult, "vote_count")).isEqualTo(expectedCorrect);
         List<Map<String, Object>> scoreChanges = readList(result, "$.current_round.result.score_changes");
-        assertThat(scoreChanges).hasSize(expectedCorrect);
-        scoreChanges.forEach(change -> assertThat(number(change, "delta")).isEqualTo(1));
+        if (voteForFake) {
+            assertThat(scoreChanges).hasSize(expectedCorrect);
+            assertThat(scoreChanges)
+                    .extracting(change -> (String) change.get("participant_id"))
+                    .containsExactlyInAnyOrderElementsOf(voters.stream().map(Participant::id).toList());
+            scoreChanges.forEach(change -> assertThat(number(change, "delta")).isEqualTo(1));
+        } else {
+            assertThat(scoreChanges).hasSize(1);
+            assertThat(scoreChanges.get(0).get("participant_id")).isEqualTo(speaker.id());
+            assertThat(number(scoreChanges.get(0), "delta")).isEqualTo(expectedFooled);
+        }
+        MvcResult restored = getSnapshot(room.gameId(), "participant", voters.get(0).session());
+        assertThat(read(restored, "$.game.status", String.class)).isEqualTo("RESULT");
+        assertThat(read(restored, "$.version", Number.class))
+                .isEqualTo(read(result, "$.version", Number.class));
+    }
+
+    @Test
+    void automaticRevealIsRescheduledAfterPauseAndResume() throws Exception {
+        ReadyRoom ready = readyRoom("공개 대기 정지", true);
+        CreatedRoom room = ready.room();
+        command("/api/v1/games/ttf/%s/commands/start".formatted(room.gameId()), room.hostSession());
+        var game = roomRepository.findByGameId(room.gameId()).orElseThrow().activeGame();
+        var round = game.currentRound().orElseThrow();
+        command("/api/v1/games/ttf/%s/rounds/%s/commands/start-voting"
+                .formatted(room.gameId(), round.id()), room.hostSession());
+        submitVote(room.gameId(), round.id(), ready.second().session(), round.statements().get(0).id());
+        command("/api/v1/games/ttf/%s/commands/pause".formatted(room.gameId()), room.hostSession());
+
+        Thread.sleep(2_100);
+        MvcResult paused = getSnapshot(room.gameId(), "participant", ready.second().session());
+        assertThat(read(paused, "$.game.status", String.class)).isEqualTo("PAUSED");
+        assertPreRevealSafe(paused);
+        command("/api/v1/games/ttf/%s/commands/resume".formatted(room.gameId()), room.hostSession());
+        assertThat(game.status()).isEqualTo(TtfGameStatus.VOTE_CLOSED);
+        awaitAutomaticResult(room.gameId());
+        assertThat(round.result()).isPresent();
+    }
+
+    @Test
+    void reconnectSnapshotRevealsOverdueResultIfScheduledTaskWasMissed() throws Exception {
+        ReadyRoom ready = readyRoom("공개 재접속", true);
+        CreatedRoom room = ready.room();
+        command("/api/v1/games/ttf/%s/commands/start".formatted(room.gameId()), room.hostSession());
+        var game = roomRepository.findByGameId(room.gameId()).orElseThrow().activeGame();
+        var round = game.currentRound().orElseThrow();
+        command("/api/v1/games/ttf/%s/rounds/%s/commands/start-voting"
+                .formatted(room.gameId(), round.id()), room.hostSession());
+        submitVote(room.gameId(), round.id(), ready.second().session(), round.statements().get(0).id());
+        votingScheduler.cancel(room.gameId(), game.version());
+
+        Thread.sleep(2_100);
+        assertThat(game.status()).isEqualTo(TtfGameStatus.VOTE_CLOSED);
+        MvcResult restored = getSnapshot(room.gameId(), "participant", ready.second().session());
+        assertThat(read(restored, "$.game.status", String.class)).isEqualTo("RESULT");
+        long revealedVersion = game.version();
+        getSnapshot(room.gameId(), "host", room.hostSession());
+        assertThat(game.version()).isEqualTo(revealedVersion);
+    }
+
+    private void awaitAutomaticResult(String gameId) throws InterruptedException {
+        // Inspect domain state so snapshot catch-up cannot hide a broken server schedule.
+        var game = roomRepository.findByGameId(gameId).orElseThrow().activeGame();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (game.status() != TtfGameStatus.RESULT && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertThat(game.status()).isEqualTo(TtfGameStatus.RESULT);
     }
 
     private void submitVote(String gameId, String roundId, Cookie participantSession, String statementId)
@@ -927,13 +1132,34 @@ class TtfApiContractIntegrationTests {
     private static String validStatements(String prefix) {
         return """
                 {
-                  "statements": [
-                    {"content": "%s 첫 번째 진짜 문장입니다.", "is_fake": false},
-                    {"content": "%s 두 번째 가짜 문장입니다.", "is_fake": true},
-                    {"content": "%s 세 번째 진짜 문장입니다.", "is_fake": false}
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "%s 첫 번째 진짜 문장입니다.", "is_fake": false},
+                      {"content": "%s 두 번째 가짜 문장입니다.", "is_fake": true},
+                      {"content": "%s 세 번째 진짜 문장입니다.", "is_fake": false}
+                    ]}
                   ]
                 }
                 """.formatted(prefix, prefix, prefix);
+    }
+
+    private static String validStatementsForTwoTopics(String prefix) {
+        return """
+                {
+                  "statement_sets": [
+                    {"topic_id": "TRAVEL", "statements": [
+                      {"content": "%s 여행 첫 번째 진짜 문장입니다.", "is_fake": false},
+                      {"content": "%s 여행 두 번째 가짜 문장입니다.", "is_fake": true},
+                      {"content": "%s 여행 세 번째 진짜 문장입니다.", "is_fake": false}
+                    ]},
+                    {"topic_id": "FOOD", "statements": [
+                      {"content": "%s 음식 첫 번째 진짜 문장입니다.", "is_fake": false},
+                      {"content": "%s 음식 두 번째 가짜 문장입니다.", "is_fake": true},
+                      {"content": "%s 음식 세 번째 진짜 문장입니다.", "is_fake": false}
+                    ]}
+                  ]
+                }
+                """.formatted(prefix, prefix, prefix, prefix, prefix, prefix);
     }
 
     private static String createRoomBody(String name, String speakerOrder, boolean anonymousVoting) {
@@ -947,7 +1173,9 @@ class TtfApiContractIntegrationTests {
                       "statement_max_length": 100,
                       "voting_duration_seconds": 60,
                       "speaker_order": "%s",
-                      "anonymous_voting": %s
+                      "anonymous_voting": %s,
+                      "round_count": 1,
+                      "topic_ids": ["TRAVEL"]
                     }
                   }
                 }

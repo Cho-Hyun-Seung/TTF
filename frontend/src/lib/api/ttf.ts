@@ -1,4 +1,4 @@
-import type { Audience, StatementDraft, TtfGameSnapshot } from '../../domain/types'
+import type { Audience, StatementSetDraft, TtfGameSnapshot, TtfTopic } from '../../domain/types'
 import { apiUrl, idempotencyHeaders, request } from './client'
 
 const ttfGamePath = (gameId: string) => `/api/v1/games/ttf/${encodeURIComponent(gameId)}`
@@ -23,6 +23,10 @@ function roundCommand(gameId: string, roundId: string, commandName: string, body
 }
 
 export const ttfGameApi = {
+  getTopics(signal?: AbortSignal) {
+    return request<TtfTopic[]>('/api/v1/games/ttf/topics', { signal })
+  },
+
   async getSnapshot(gameId: string, audience: Audience, signal?: AbortSignal) {
     const query = new URLSearchParams({ audience })
     const snapshot = await request<Omit<TtfGameSnapshot, 'client_received_at_ms'>>(
@@ -32,13 +36,16 @@ export const ttfGameApi = {
     return { ...snapshot, client_received_at_ms: Date.now() }
   },
 
-  saveStatements(gameId: string, statements: StatementDraft[]) {
+  saveStatements(gameId: string, statementSets: StatementSetDraft[]) {
     return request<void>(`${ttfGamePath(gameId)}/participants/me/statements`, {
       method: 'PUT',
       body: JSON.stringify({
-        statements: statements.map((statement) => ({
-          content: statement.content.trim(),
-          is_fake: statement.truth === 'FAKE',
+        statement_sets: statementSets.map((statementSet) => ({
+          topic_id: statementSet.topic_id,
+          statements: statementSet.statements.map((statement) => ({
+            content: statement.content.trim(),
+            is_fake: statement.truth === 'FAKE',
+          })),
         })),
       }),
     })

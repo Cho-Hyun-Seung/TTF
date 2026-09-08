@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-개발 서버는 기본적으로 `/api` 요청을 `http://localhost:8080`으로 프록시합니다. 다른 백엔드 주소를 사용할 때는 `.env.example`을 참고해 `VITE_DEV_API_TARGET`을 설정합니다. 배포 환경에서 API가 다른 origin에 있다면 `VITE_API_BASE_URL`을 지정하고, 백엔드의 credential 포함 CORS와 쿠키 설정을 함께 구성해야 합니다.
+개발 서버는 기본적으로 `/api` 요청을 `http://localhost:8081`으로 프록시합니다. 다른 백엔드 주소를 사용할 때는 `.env.example`을 참고해 `VITE_DEV_API_TARGET`을 설정합니다. 배포 환경에서 API가 다른 origin에 있다면 `VITE_API_BASE_URL`을 지정하고, 백엔드의 credential 포함 CORS와 쿠키 설정을 함께 구성해야 합니다.
 
 ## 명령어
 

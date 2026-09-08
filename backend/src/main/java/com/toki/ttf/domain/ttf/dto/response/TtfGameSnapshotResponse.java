@@ -17,7 +17,7 @@ public record TtfGameSnapshotResponse(
         Game game,
         Viewer viewer,
         List<ParticipantSummary> participants,
-        List<MyStatement> myStatements,
+        List<MyStatementSet> myStatementSets,
         RoundSnapshot currentRound,
         List<LeaderboardEntry> leaderboard
 ) {
@@ -40,7 +40,16 @@ public record TtfGameSnapshotResponse(
             int statementMaxLength,
             int votingDurationSeconds,
             SpeakerOrder speakerOrder,
-            boolean anonymousVoting
+            boolean anonymousVoting,
+            int roundCount,
+            List<Topic> topics
+    ) {}
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record Topic(
+            String id,
+            String title,
+            String example
     ) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -63,6 +72,12 @@ public record TtfGameSnapshotResponse(
     ) {}
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record MyStatementSet(
+            Topic topic,
+            List<MyStatement> statements
+    ) {}
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record MyStatement(
             String id,
             String content,
@@ -75,10 +90,12 @@ public record TtfGameSnapshotResponse(
             String id,
             int number,
             int total,
+            Topic topic,
             Person speaker,
             List<VisibleStatement> statements,
             Instant votingStartedAt,
             Instant votingEndsAt,
+            Instant resultRevealsAt,
             VoteProgress voteProgress,
             String myVoteStatementId,
             RoundResult result

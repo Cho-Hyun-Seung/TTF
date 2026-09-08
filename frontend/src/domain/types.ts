@@ -17,6 +17,12 @@ export type Audience = 'participant' | 'host' | 'display'
 export type ViewerRole = 'PARTICIPANT' | 'HOST' | 'DISPLAY'
 export type StatementTruth = 'TRUE' | 'FAKE'
 
+export interface TtfTopic {
+  id: string
+  title: string
+  example: string
+}
+
 export interface RoomSettings {
   max_participants: number
 }
@@ -27,6 +33,8 @@ export interface TtfGameSettings {
   voting_duration_seconds: number
   speaker_order: 'RANDOM' | 'JOIN_ORDER'
   anonymous_voting: boolean
+  round_count: number
+  topics: TtfTopic[]
 }
 
 export interface RoomSummary {
@@ -98,10 +106,12 @@ export interface RoundSnapshot {
   id: string
   number: number
   total: number
+  topic: TtfTopic
   speaker: { id: string; nickname: string }
   statements: VisibleStatement[]
   voting_started_at?: string
   voting_ends_at?: string
+  result_reveals_at?: string
   vote_progress: VoteProgress
   my_vote_statement_id?: string
   result?: RoundResult
@@ -132,11 +142,7 @@ export interface TtfGameSnapshot {
   }
   viewer: Viewer
   participants?: ParticipantSummary[]
-  my_statements?: Array<{
-    id: string
-    content: string
-    is_fake: boolean
-  }>
+  my_statement_sets?: MyStatementSet[]
   current_round?: RoundSnapshot
   leaderboard?: LeaderboardEntry[]
 }
@@ -153,6 +159,8 @@ export interface CreateRoomInput {
       voting_duration_seconds: number
       speaker_order: TtfGameSettings['speaker_order']
       anonymous_voting: boolean
+      round_count: number
+      topic_ids: string[]
     }
   }
 }
@@ -175,4 +183,18 @@ export interface JoinRoomResponse {
 export interface StatementDraft {
   content: string
   truth: StatementTruth
+}
+
+export interface StatementSetDraft {
+  topic_id: string
+  statements: StatementDraft[]
+}
+
+export interface MyStatementSet {
+  topic: TtfTopic
+  statements: Array<{
+    id: string
+    content: string
+    is_fake: boolean
+  }>
 }

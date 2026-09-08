@@ -34,6 +34,14 @@ export function CheckIcon(props: IconProps) {
   )
 }
 
+export function CloseIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m6 6 12 12M18 6 6 18" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </IconBase>
+  )
+}
+
 export function CopyIcon(props: IconProps) {
   return (
     <IconBase {...props}>
@@ -94,4 +102,3 @@ export function WifiOffIcon(props: IconProps) {
     </IconBase>
   )
 }
-

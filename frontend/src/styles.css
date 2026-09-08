@@ -302,6 +302,193 @@ a {
   line-height: 1.5;
 }
 
+.modal-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgb(13 28 21 / 68%);
+  backdrop-filter: blur(6px);
+}
+
+.game-guide-modal {
+  position: relative;
+  width: min(760px, 100%);
+  padding: 38px;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: 28px;
+  background: var(--surface);
+  box-shadow: 0 28px 90px rgb(5 20 13 / 30%);
+}
+
+.modal-close {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  background: white;
+}
+
+.modal-close:hover {
+  color: var(--ink);
+  background: var(--mint-soft);
+}
+
+.modal-close svg {
+  width: 20px;
+}
+
+.game-guide-modal__header {
+  padding-right: 48px;
+  display: grid;
+  grid-template-columns: 135px 1fr;
+  align-items: center;
+  gap: 26px;
+}
+
+.game-guide-modal__header h2,
+.game-guide-modal__header p {
+  margin: 0;
+}
+
+.game-guide-modal__header h2 {
+  font-family: 'Gowun Batang', Georgia, serif;
+  font-size: clamp(29px, 4vw, 40px);
+  letter-spacing: -0.05em;
+}
+
+.game-guide-modal__header > div:last-child > p:last-child {
+  margin-top: 10px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mini-card-deck {
+  position: relative;
+  height: 100px;
+}
+
+.mini-card-deck span {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  width: 90px;
+  height: 66px;
+  border: 1px solid #c8d1ca;
+  border-radius: 12px;
+  display: grid;
+  place-items: end center;
+  padding-bottom: 11px;
+  color: var(--forest);
+  background: white;
+  box-shadow: 0 8px 20px rgb(31 75 56 / 12%);
+  font: 800 10px/1 sans-serif;
+  letter-spacing: 0.1em;
+  transform: rotate(-9deg);
+}
+
+.mini-card-deck span:nth-child(2) {
+  top: 10px;
+  left: 30px;
+  background: var(--mint-soft);
+  transform: rotate(1deg);
+}
+
+.mini-card-deck span:nth-child(3) {
+  top: 18px;
+  left: 45px;
+  color: var(--coral-dark);
+  background: #fff6f3;
+  transform: rotate(9deg);
+}
+
+.game-guide-steps {
+  padding: 0;
+  margin: 32px 0 22px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  list-style: none;
+}
+
+.game-guide-steps li {
+  min-height: 112px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  display: flex;
+  gap: 13px;
+  background: #fff;
+}
+
+.game-guide-steps li > span {
+  color: var(--coral-dark);
+  font: 700 15px/1 Georgia, serif;
+}
+
+.game-guide-steps h3,
+.game-guide-steps p {
+  margin: 0;
+}
+
+.game-guide-steps h3 {
+  margin-bottom: 7px;
+  font-size: 14px;
+}
+
+.game-guide-steps p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.game-guide-rules {
+  padding: 18px 20px;
+  margin-bottom: 22px;
+  border-radius: 16px;
+  background: var(--mint-soft);
+}
+
+.game-guide-rules h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.game-guide-rules ul {
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  list-style: none;
+}
+
+.game-guide-rules li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.game-guide-rules svg {
+  width: 15px;
+  flex: 0 0 auto;
+  color: var(--forest);
+}
+
 .hero-art {
   position: relative;
   min-height: 470px;
@@ -705,6 +892,98 @@ a {
   display: block;
 }
 
+.topic-options {
+  padding: 0;
+  margin: 0 0 28px;
+  border: 0;
+}
+
+.topic-options > legend {
+  margin-bottom: 7px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.topic-options > p {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.topic-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.topic-card {
+  min-height: 94px;
+  padding: 14px;
+  border: 1px solid #cdd2cd;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.topic-card:has(input:checked) {
+  border-color: var(--forest);
+  background: var(--mint-soft);
+  box-shadow: inset 0 0 0 1px var(--forest);
+}
+
+.topic-card:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.topic-card input {
+  margin: 3px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--forest);
+}
+
+.topic-card strong,
+.topic-card small {
+  display: block;
+}
+
+.topic-card strong {
+  font-size: 13px;
+}
+
+.topic-card small {
+  margin-top: 5px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.topic-options__state {
+  min-height: 70px;
+  padding: 14px;
+  border: 1px dashed #cdd2cd;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.topic-options__state .text-button {
+  margin-top: 4px;
+}
+
+.host-topic-summary {
+  color: var(--forest) !important;
+  font-weight: 700;
+}
+
 .radio-card strong,
 .switch-row strong {
   font-size: 13px;
@@ -1028,6 +1307,127 @@ a {
   line-height: 1.55;
 }
 
+.topic-tabs {
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.topic-tabs button {
+  min-height: 42px;
+  padding: 0 13px;
+  border: 1px solid #cbd2cc;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.topic-tabs button > span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  place-items: center;
+  background: #eef0ec;
+  font: 700 10px/1 Georgia, serif;
+}
+
+.topic-tabs button svg {
+  width: 15px;
+  color: #2f8a5a;
+}
+
+.topic-tabs button.is-active {
+  border-color: var(--forest);
+  color: white;
+  background: var(--forest);
+}
+
+.topic-tabs button.is-active > span {
+  color: var(--forest);
+  background: white;
+}
+
+.topic-tabs button.is-active svg {
+  color: white;
+}
+
+.topic-editor {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgb(255 253 249 / 60%);
+}
+
+.topic-prompt {
+  padding: 18px;
+  margin-bottom: 16px;
+  border-radius: 15px;
+  background: var(--mint-soft);
+}
+
+.topic-prompt > span {
+  color: var(--forest);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.topic-prompt h3 {
+  margin: 3px 0 8px;
+  font-size: 20px;
+}
+
+.topic-prompt p,
+.topic-prompt small {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.topic-prompt p strong {
+  color: var(--coral-dark);
+}
+
+.topic-prompt small {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.topic-editor__navigation {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topic-editor__navigation .button {
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 12px;
+}
+
+.topic-editor__navigation > span {
+  color: var(--ink-soft);
+  font: 700 12px/1 Georgia, serif;
+}
+
+.statement-form > .button--block {
+  margin-top: 20px;
+}
+
 .statement-fields {
   display: grid;
   gap: 13px;
@@ -1171,6 +1571,20 @@ a {
   gap: 6px;
 }
 
+.result-reveal-notice {
+  text-align: center;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.result-reveal-notice .waiting-dots {
+  justify-content: center;
+}
+
+.result-reveal-notice .closed-symbol {
+  margin-inline: auto;
+}
+
 .waiting-dots span {
   width: 7px;
   height: 7px;
@@ -1219,13 +1633,22 @@ a {
 }
 
 .round-heading p,
-.round-heading h2 {
+.round-heading h2,
+.round-heading small {
   margin: 0;
 }
 
 .round-heading p {
+  color: var(--coral-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.round-heading small {
+  display: block;
+  margin-top: 4px;
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .round-heading h2 {
@@ -1504,7 +1927,7 @@ a {
   background: var(--coral-dark);
 }
 
-.result-card p:not(.voter-list) {
+.result-card > p {
   margin: 13px 0;
   font-family: 'Gowun Batang', Georgia, serif;
   font-size: 17px;
@@ -1517,10 +1940,49 @@ a {
 }
 
 .voter-list {
-  margin: 10px 0 0;
+  padding-top: 11px;
+  margin-top: 11px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
   color: var(--ink-soft);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: 11px;
+}
+
+.voter-list__label {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.voter-list__badges {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+}
+
+.voter-badge {
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid #bfd2c4;
+  border-radius: 999px;
+  overflow: hidden;
+  color: var(--forest);
+  background: var(--mint-soft);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voter-list__empty {
+  color: #7f8981;
 }
 
 .result-summary {
@@ -2063,6 +2525,20 @@ a {
   text-align: center;
 }
 
+.display-reveal {
+  padding: 24px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 8%);
+}
+
+.display-reveal h2 {
+  margin: 0;
+  font-family: 'Gowun Batang', Georgia, serif;
+  font-size: clamp(30px, 3vw, 45px);
+  line-height: 1.4;
+}
+
 .display-round__body > aside h2 {
   margin: 0;
   font-family: 'Gowun Batang', Georgia, serif;
@@ -2201,6 +2677,45 @@ a {
 }
 
 @media (max-width: 640px) {
+  .modal-backdrop {
+    padding-right: 12px;
+    padding-left: 12px;
+    place-items: start center;
+  }
+
+  .game-guide-modal {
+    padding: 30px 20px 22px;
+    border-radius: 22px;
+  }
+
+  .modal-close {
+    top: 16px;
+    right: 16px;
+  }
+
+  .game-guide-modal__header {
+    padding-right: 36px;
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .mini-card-deck {
+    display: none;
+  }
+
+  .game-guide-steps,
+  .game-guide-rules ul {
+    grid-template-columns: 1fr;
+  }
+
+  .game-guide-steps {
+    margin-top: 24px;
+  }
+
+  .game-guide-steps li {
+    min-height: auto;
+  }
+
   .topbar {
     width: calc(100% - 32px);
     min-height: 72px;
@@ -2307,7 +2822,8 @@ a {
   }
 
   .field-row,
-  .option-group {
+  .option-group,
+  .topic-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2370,6 +2886,15 @@ a {
 
   .statement-field {
     padding: 14px;
+  }
+
+  .topic-editor {
+    padding: 13px;
+  }
+
+  .topic-editor__navigation .button {
+    min-width: 0;
+    padding: 0 12px;
   }
 
   .waiting-card,

@@ -339,7 +339,9 @@ public class RoomService {
                             request.game().settings().statementMaxLength(),
                             request.game().settings().votingDurationSeconds(),
                             SpeakerOrder.valueOf(request.game().settings().speakerOrder().name()),
-                            request.game().settings().anonymousVoting()
+                            request.game().settings().anonymousVoting(),
+                            request.game().settings().roundCount(),
+                            request.game().settings().topicIds()
                     ),
                     now,
                     now.plus(activeRoomTtl)

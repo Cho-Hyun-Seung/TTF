@@ -8,6 +8,9 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import com.toki.ttf.domain.ttf.constants.TtfTopic;
+
+import java.util.List;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record CreateRoomRequest(
@@ -31,8 +34,26 @@ public record CreateRoomRequest(
             @NotNull @Min(20) @Max(200) Integer statementMaxLength,
             @NotNull @Min(15) @Max(180) Integer votingDurationSeconds,
             @NotNull SpeakerOrder speakerOrder,
-            @NotNull Boolean anonymousVoting
-    ) {}
+            @NotNull Boolean anonymousVoting,
+            @NotNull @Min(1) @Max(8) Integer roundCount,
+            @NotNull @Size(min = 1, max = 8) List<@NotNull TtfTopic> topicIds
+    ) {
+        public TtfSettings(
+                Integer statementMaxLength,
+                Integer votingDurationSeconds,
+                SpeakerOrder speakerOrder,
+                Boolean anonymousVoting
+        ) {
+            this(
+                    statementMaxLength,
+                    votingDurationSeconds,
+                    speakerOrder,
+                    anonymousVoting,
+                    1,
+                    List.of(TtfTopic.TRAVEL)
+            );
+        }
+    }
 
     public enum GameType {
         TTF

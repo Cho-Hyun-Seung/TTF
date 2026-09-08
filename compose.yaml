@@ -1,0 +1,33 @@
+services:
+  ttf-backend:
+    build:
+      context: ./backend
+    environment:
+      SERVER_PORT: 8081
+      TTF_COOKIE_SECURE: ${TTF_COOKIE_SECURE:-false}
+      TTF_CORS_ALLOWED_ORIGINS: ${TTF_CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      TTF_FRONTEND_BASE_URL: ${TTF_FRONTEND_BASE_URL:-http://localhost:5173}
+    ports:
+      - "${BACKEND_PORT:-8081}:8081"
+    restart: unless-stopped
+    networks:
+      proxy-network:
+        aliases:
+          - ttf-backend
+
+  ttf-frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - ttf-backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    restart: unless-stopped
+    networks:
+      proxy-network:
+        aliases:
+          - ttf-frontend
+networks:
+  proxy-network:
+    external: true
+    name: "${PROXY_NETWORK_NAME:-proxy-network}"

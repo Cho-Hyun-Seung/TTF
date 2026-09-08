@@ -7,6 +7,7 @@ import {
   Leaderboard,
   PausedNotice,
   ResultPanel,
+  ResultRevealNotice,
   RoundHeading,
   StatementCards,
   VoteProgress,
@@ -121,10 +122,14 @@ function ParticipantRound({
 
           {snapshot.game.status === 'VOTE_CLOSED' ? (
             <section className="speaker-wait">
-              <span className="closed-symbol" aria-hidden="true">✓</span>
-              <p className="eyebrow">투표 마감</p>
-              <h2>과연 가짜는 무엇이었을까요?</h2>
-              <p>진행자가 곧 정답을 공개할 거예요.</p>
+              {round.result_reveals_at ? <ResultRevealNotice /> : (
+                <>
+                  <span className="closed-symbol" aria-hidden="true">✓</span>
+                  <p className="eyebrow">투표 마감</p>
+                  <h2>과연 가짜는 무엇이었을까요?</h2>
+                  <p>진행자가 곧 정답을 공개할 거예요.</p>
+                </>
+              )}
             </section>
           ) : null}
         </section>
@@ -164,9 +169,12 @@ export function ParticipantRoomPage() {
         {snapshot.game.status === 'PAUSED' ? <PausedNotice snapshot={snapshot} /> : null}
         {['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.game.status) && (!snapshot.viewer.is_ready || editing) ? (
           <StatementEditor
-            initialStatements={editing ? snapshot.my_statements?.map((statement) => ({
-              content: statement.content,
-              truth: statement.is_fake ? 'FAKE' : 'TRUE',
+            initialStatementSets={editing ? snapshot.my_statement_sets?.map((set) => ({
+              topic_id: set.topic.id,
+              statements: set.statements.map((statement) => ({
+                content: statement.content,
+                truth: statement.is_fake ? 'FAKE' : 'TRUE',
+              })),
             })) : undefined}
             maxLength={snapshot.game.settings.statement_max_length}
             minLength={snapshot.game.settings.statement_min_length}
@@ -175,6 +183,7 @@ export function ParticipantRoomPage() {
               await refresh()
             }}
             gameId={gameId}
+            topics={snapshot.game.settings.topics}
           />
         ) : null}
         {['LOBBY', 'SUBMISSION', 'READY'].includes(snapshot.game.status) && snapshot.viewer.is_ready && !editing ? <WaitingForStart onEdit={() => setEditing(true)} snapshot={snapshot} /> : null}

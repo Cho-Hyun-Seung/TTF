@@ -1,6 +1,7 @@
 package com.toki.ttf.domain.ttf.entity;
 
 import com.toki.ttf.domain.ttf.constants.RoundStatus;
+import com.toki.ttf.domain.ttf.constants.TtfTopic;
 import com.toki.ttf.domain.ttf.value.RoundResult;
 import lombok.Getter;
 import lombok.experimental.Accessors;
@@ -21,6 +22,8 @@ public final class Round {
     @Getter
     private final String speakerParticipantId;
     @Getter
+    private final TtfTopic topic;
+    @Getter
     private final int number;
     @Getter
     private final List<Statement> statements;
@@ -28,13 +31,22 @@ public final class Round {
     private RoundStatus status;
     private Instant votingStartedAt;
     private Instant votingEndsAt;
+    private Instant resultRevealsAt;
     private Instant revealedAt;
     private RoundResult result;
 
-    Round(String id, String gameId, String speakerParticipantId, int number, List<Statement> statements) {
+    Round(
+            String id,
+            String gameId,
+            String speakerParticipantId,
+            TtfTopic topic,
+            int number,
+            List<Statement> statements
+    ) {
         this.id = Objects.requireNonNull(id, "id");
         this.gameId = Objects.requireNonNull(gameId, "gameId");
         this.speakerParticipantId = Objects.requireNonNull(speakerParticipantId, "speakerParticipantId");
+        this.topic = Objects.requireNonNull(topic, "topic");
         this.number = number;
         this.statements = List.copyOf(statements);
         this.status = RoundStatus.ROUND_INTRO;
@@ -62,6 +74,14 @@ public final class Round {
 
     public synchronized Instant revealedAt() {
         return revealedAt;
+    }
+
+    public synchronized Instant resultRevealsAt() {
+        return resultRevealsAt;
+    }
+
+    synchronized void scheduleResultReveal(Instant revealsAt) {
+        resultRevealsAt = Objects.requireNonNull(revealsAt, "revealsAt");
     }
 
     public synchronized Optional<RoundResult> result() {

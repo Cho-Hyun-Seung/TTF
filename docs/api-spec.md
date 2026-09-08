@@ -189,7 +189,7 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 
 - `ROUND_INTRO`, `VOTING`, `VOTE_CLOSED`에는 문장 진위, 정답 ID, 개별 투표자와 득표 결과를 공개하지 않는다.
 - 진행자도 결과 공개 전에는 정답 정보를 받지 않는다.
-- 참가자는 시작 전 자기 `my_statements`에서만 `is_fake`를 볼 수 있다.
+- 참가자는 시작 전 자기 `my_statement_sets[].statements`에서만 `is_fake`를 볼 수 있다.
 - 결과는 `RESULT` 이후 현재 라운드의 `result`로 공개한다.
 - `anonymous_voting=true`이면 결과 공개 후에도 `voters`를 생략한다.
 - SSE payload에는 원문 문장, 진위, 투표 대상 ID나 세션 정보를 넣지 않는다.
@@ -197,7 +197,8 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 ### 3.4 점수와 순위
 
 - 가짜 문장을 고른 참가자에게 라운드당 1점을 준다.
-- 발표자 기만 점수와 무득표 보너스는 없다.
+- 발표자는 가짜 문장을 고르지 않은 참가자 1명당 1점을 받는다.
+- 모든 참가자를 속여도 별도의 무득표 보너스는 없다.
 - 점수는 결과 공개 명령에서 한 번만 반영한다.
 - 동점은 공동 순위이며 다음 순위는 경쟁 순위 방식이다. 예: `1, 1, 3`.
 
@@ -217,6 +218,7 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 
 | Method | Path | 권한 | 필수 헤더 | 성공 |
 |---|---|---|---|---:|
+| `GET` | `/games/ttf/topics` | 공개 | - | `200` |
 | `GET` | `/games/ttf/{game_id}/snapshot?audience=...` | audience별 | - | `200` |
 | `GET` | `/games/ttf/{game_id}/events?audience=...` | audience별 | `Accept: text/event-stream` 권장 | `200` |
 | `PUT` | `/games/ttf/{game_id}/participants/me/statements` | 참가자 | - | `204` |
@@ -254,7 +256,9 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
       "statement_max_length": 100,
       "voting_duration_seconds": 60,
       "speaker_order": "RANDOM",
-      "anonymous_voting": true
+      "anonymous_voting": true,
+      "round_count": 3,
+      "topic_ids": ["TRAVEL", "FOOD", "TALENT"]
     }
   }
 }
@@ -269,6 +273,8 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 - `voting_duration_seconds`: `15..180`
 - `speaker_order`: `RANDOM` 또는 `JOIN_ORDER`
 - `anonymous_voting`: boolean
+- `round_count`: `1..8`
+- `topic_ids`: 서버 주제 카탈로그의 ID로 구성된 중복 없는 배열이며 개수가 `round_count`와 같아야 함
 - 문장 최소 길이는 MVP에서 5자로 고정
 
 응답: `201 Created`, 진행자 쿠키 발급
@@ -381,6 +387,30 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 
 응답: `204 No Content`
 
+### 5.6 TTF 주제 카탈로그
+
+`GET /api/v1/games/ttf/topics`
+
+- 인증 없이 조회할 수 있다.
+- Java 서버에 정의된 주제 ID, 사용자용 제목, 참고 예시를 순서대로 반환한다.
+- 클라이언트는 별도의 주제 목록을 하드코딩하지 않고 이 응답을 사용한다.
+
+응답: `200 ApiResponse<TtfTopicResponse[]>`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "TRAVEL",
+      "title": "여행",
+      "example": "나는 혼자 해외여행을 떠난 적이 있다."
+    }
+  ],
+  "response_time": "2026-09-08T00:00:00Z"
+}
+```
+
 ## 6. TTF 스냅샷
 
 ### 6.1 조회
@@ -396,6 +426,7 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 - `audience`는 대소문자를 구분하지 않는다.
 - `display`는 진행자 쿠키가 함께 전송돼도 공개 범위만 반환한다.
 - 조회 시 투표 마감 시각이 지났다면 서버가 먼저 `VOTE_CLOSED`를 반영한다.
+- 전원 투표 후 자동 공개 시각이 지났다면 조회 시에도 `RESULT` 전환을 보정한다. `current_round.result_reveals_at`은 자동 공개를 기다리는 `VOTE_CLOSED`에서만 제공하는 UTC 예정 시각이며 정답·득표 데이터는 포함하지 않는다.
 - 새로고침, 최초 접속, SSE 재연결과 이벤트 누락 복구는 이 API를 사용한다.
 
 응답: `200 ApiResponse<TtfGameSnapshotResponse>`
@@ -437,7 +468,15 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
         "statement_max_length": 100,
         "voting_duration_seconds": 60,
         "speaker_order": "RANDOM",
-        "anonymous_voting": true
+        "anonymous_voting": true,
+        "round_count": 1,
+        "topics": [
+          {
+            "id": "TRAVEL",
+            "title": "여행",
+            "example": "나는 혼자 해외여행을 떠난 적이 있다."
+          }
+        ]
       }
     },
     "viewer": {
@@ -450,6 +489,11 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
       "id": "round_01",
       "number": 1,
       "total": 3,
+      "topic": {
+        "id": "TRAVEL",
+        "title": "여행",
+        "example": "나는 혼자 해외여행을 떠난 적이 있다."
+      },
       "speaker": {
         "id": "participant_01",
         "nickname": "지수"
@@ -491,13 +535,13 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 | `room`, `game`, `current_round` | O | O | O |
 | `viewer.role` | O | O | O |
 | `viewer.participant_id`, `nickname`, `is_ready` | O | - | - |
-| 시작 전 `my_statements` | O | - | - |
+| 시작 전 `my_statement_sets` | O | - | - |
 | `current_round.my_vote_statement_id` | O | - | - |
 | `participants` | - | O | - |
 | 공개된 `current_round.result` | O | O | O |
 | `leaderboard` | O | O | O |
 
-- `my_statements`는 `LOBBY`, `SUBMISSION`, `READY`에서만 포함한다.
+- `my_statement_sets`는 `LOBBY`, `SUBMISSION`, `READY`에서만 포함하며 선택된 모든 주제와 본인 문장을 포함한다.
 - `participants`에는 `id`, `nickname`, `connection_status`, `is_ready`, `score`, `is_current_speaker`가 포함된다.
 - `leaderboard`는 `FINISHED`에서만 포함한다.
 - `leaderboard[].is_me`는 participant 본인만 `true`이고 host/display에서는 모두 `false`다.
@@ -564,28 +608,33 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 
 ```json
 {
-  "statements": [
+  "statement_sets": [
     {
-      "content": "나는 사막에서 밤을 보낸 적이 있다.",
-      "is_fake": false
-    },
-    {
-      "content": "나는 커피를 한 번도 마신 적이 없다.",
-      "is_fake": true
-    },
-    {
-      "content": "나는 세 개의 악기를 연주할 수 있다.",
-      "is_fake": false
+      "topic_id": "TRAVEL",
+      "statements": [
+        {
+          "content": "나는 사막에서 밤을 보낸 적이 있다.",
+          "is_fake": false
+        },
+        {
+          "content": "나는 커피를 한 번도 마신 적이 없다.",
+          "is_fake": true
+        },
+        {
+          "content": "나는 세 개의 악기를 연주할 수 있다.",
+          "is_fake": false
+        }
+      ]
     }
   ]
 }
 ```
 
 - 해당 방의 참가자 쿠키가 필요하다.
-- 문장은 정확히 3개여야 한다.
-- `is_fake=true`는 정확히 1개여야 한다.
+- `statement_sets`는 방 설정의 모든 주제를 정확히 한 번씩 포함해야 한다.
+- 각 주제의 문장은 정확히 3개이고 `is_fake=true`는 정확히 1개여야 한다.
 - 공백 정리 후 각 문장은 설정된 `statement_min_length..statement_max_length`를 만족해야 한다.
-- Unicode와 공백 정규화 후 같은 내용은 중복할 수 없다.
+- Unicode와 공백 정규화 후 주제 안팎에서 같은 내용은 중복할 수 없다.
 - `LOBBY`, `SUBMISSION`, `READY`에서만 저장할 수 있다.
 - 저장 성공 시 참가자를 준비 완료로 표시하고 전체 준비 상태를 다시 계산한다.
 - 배열 순서와 실제 공개 순서는 무관하며 공개 순서는 서버가 결정한다.
@@ -612,6 +661,9 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 - 발표자는 투표할 수 없다.
 - 참가자 한 명은 라운드당 한 표만 가지며 다시 요청하면 선택 statement를 변경한다.
 - 같은 statement를 다시 선택해도 표 수와 version을 증가시키지 않는다.
+- 발표자를 제외한 전원의 표가 저장되면 마지막 표 저장과 마감을 원자적으로 처리한다. 마지막 투표는 `204`로 승인하고, 이후 재전송·변경은 `409 VOTING_NOT_OPEN`으로 거절한다.
+- 전원 투표 마감 시 `voting.closed`와 `game.status_changed`를 발행하고 2초 후 서버가 자동으로 결과를 공개한다. `current_round.result_reveals_at` 이전에는 진행자 명령으로도 조기 공개할 수 없다.
+- 자동 공개는 `round.result_revealed`, `score.updated`, `game.status_changed`로 알리고, 클라이언트는 전체 스냅샷을 조회한다. 제한 시간 종료 또는 진행자의 조기 마감은 기존 수동 결과 공개를 유지한다.
 - 마감과 경합하면 서버에서 마감을 먼저 반영하고 `409 VOTING_NOT_OPEN`을 반환할 수 있다.
 
 응답: `204 No Content`
@@ -645,6 +697,7 @@ ROUND_INTRO | VOTING | VOTE_CLOSED | RESULT -> PAUSED -> 이전 상태
 - 이미 마감 시각이 지났다면 먼저 투표를 닫으며 연장은 실패한다.
 - 일시 정지 요청이 투표 마감과 경합하면 마감을 먼저 반영할 수 있다.
 - 자동 마감과 수동 마감은 원자적으로 한 번만 상태를 변경한다.
+- 전원 투표 후 자동 공개는 라운드·게임 상태·공개 예정 시각을 다시 확인하고 결과와 점수를 한 번만 반영한다. 일시 정지 시 공개 잔여 시간을 보존하고 재개 시 재예약하며, 종료된 게임이나 이전 라운드의 예약은 결과를 변경하지 않는다.
 - 결과 공개 재시도로 점수가 중복 반영되지 않는다.
 
 ## 9. SSE 실시간 이벤트

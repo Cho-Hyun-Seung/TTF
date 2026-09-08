@@ -6,6 +6,7 @@ import {
   Leaderboard,
   PausedNotice,
   ResultPanel,
+  ResultRevealNotice,
   RoundHeading,
   StatementCards,
   VoteProgress,
@@ -49,14 +50,18 @@ export function DisplayPage() {
         {round && ['ROUND_INTRO', 'VOTING', 'VOTE_CLOSED'].includes(snapshot.game.status) ? (
           <section className="display-round">
             <RoundHeading round={round} />
-            <div className="display-round__body">
-              <StatementCards statements={round.statements} />
-              <aside>
-                {snapshot.game.status === 'ROUND_INTRO' ? <><p className="eyebrow">이야기를 들어보세요</p><h2>어느 문장이<br />가짜일까요?</h2></> : null}
-                {snapshot.game.status === 'VOTING' ? <><Countdown clientReceivedAt={snapshot.client_received_at_ms} endsAt={round.voting_ends_at} large serverTime={snapshot.server_time} /><VoteProgress {...round.vote_progress} /></> : null}
-                {snapshot.game.status === 'VOTE_CLOSED' ? <><span className="closed-symbol">✓</span><p className="eyebrow">투표 마감</p><h2>곧 정답을<br />공개합니다</h2></> : null}
-              </aside>
-            </div>
+            {snapshot.game.status === 'VOTE_CLOSED' && round.result_reveals_at ? (
+              <div className="display-reveal"><ResultRevealNotice /></div>
+            ) : (
+              <div className="display-round__body">
+                <StatementCards statements={round.statements} />
+                <aside>
+                  {snapshot.game.status === 'ROUND_INTRO' ? <><p className="eyebrow">이야기를 들어보세요</p><h2>어느 문장이<br />가짜일까요?</h2></> : null}
+                  {snapshot.game.status === 'VOTING' ? <><Countdown clientReceivedAt={snapshot.client_received_at_ms} endsAt={round.voting_ends_at} large serverTime={snapshot.server_time} /><VoteProgress {...round.vote_progress} /></> : null}
+                  {snapshot.game.status === 'VOTE_CLOSED' ? <><span className="closed-symbol" aria-hidden="true">✓</span><p className="eyebrow">투표 마감</p><h2>곧 정답을<br />공개합니다</h2></> : null}
+                </aside>
+              </div>
+            )}
           </section>
         ) : null}
 
