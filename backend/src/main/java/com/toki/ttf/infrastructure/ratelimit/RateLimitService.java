@@ -72,6 +72,7 @@ public class RateLimitService {
         windows.entrySet().removeIf(entry -> entry.getValue().endsAt <= now);
     }
 
+    /* JVM이 살아있지만 Bean이 죽은 경우, 스레드가 살아있으므로 명시적 종료 */
     @PreDestroy
     public void close() {
         cleanupExecutor.shutdownNow();
