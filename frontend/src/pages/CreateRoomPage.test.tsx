@@ -31,10 +31,82 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
 describe('CreateRoomPage', () => {
+  it('랜덤 선택 결과를 숨기고 생성 시 현재 라운드 수만큼 중복 없이 뽑는다', async () => {
+    fetchMock
+      .mockResolvedValueOnce(success(topics))
+      .mockResolvedValueOnce(success({
+        room: { id: 'room-1', code: 'ABC123', join_url: '/join/ABC123' },
+        game: { id: 'game-1', type: 'TTF' },
+      }, 201))
+    render(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
+    await screen.findByRole('checkbox', { name: /여행/ })
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0)
+    fireEvent.click(screen.getByRole('button', { name: '주제 랜덤 선택' }))
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+    for (const topic of topics) {
+      expect(screen.queryByText(topic.title)).not.toBeInTheDocument()
+      expect(screen.queryByText(topic.example)).not.toBeInTheDocument()
+    }
+    expect(random).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('주제 라운드 수'), { target: { value: '2' } })
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    fireEvent.change(screen.getByLabelText('게임방 이름'), { target: { value: '랜덤 주제' } })
+    fireEvent.click(screen.getByRole('button', { name: /게임방 만들기/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
+    expect(requestBody.game.settings).toMatchObject({ round_count: 2, topic_ids: ['FOOD', 'TALENT'] })
+  })
+
+  it('직접 선택으로 돌아가면 이전 수동 선택을 복원한다', async () => {
+    fetchMock.mockResolvedValueOnce(success(topics))
+    render(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
+    await screen.findByRole('checkbox', { name: /여행/ })
+    fireEvent.click(screen.getByRole('checkbox', { name: /여행/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /어린 시절/ }))
+    fireEvent.click(screen.getByRole('button', { name: '주제 랜덤 선택' }))
+    fireEvent.click(screen.getByRole('button', { name: '주제 직접 선택' }))
+    expect(screen.getByRole('checkbox', { name: /여행/ })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /음식/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /특기/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /어린 시절/ })).toBeChecked()
+  })
+
+  it('로딩과 오류 중에는 랜덤 선택을 막고 목록 재조회 후 허용한다', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(success(topics))
+    render(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
+    const randomButton = screen.getByRole('button', { name: '주제 랜덤 선택' })
+    expect(randomButton).toBeDisabled()
+    await screen.findByText('주제 목록을 불러오지 못했어요. 다시 시도해 주세요.')
+    expect(randomButton).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '다시 불러오기' }))
+    await waitFor(() => expect(randomButton).toBeEnabled())
+  })
+
+  it('유효한 라운드 수에서만 랜덤 선택을 허용한다', async () => {
+    fetchMock.mockResolvedValueOnce(success(topics))
+    render(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
+    await screen.findByRole('checkbox', { name: /여행/ })
+    const count = screen.getByLabelText('주제 라운드 수')
+    const randomButton = screen.getByRole('button', { name: '주제 랜덤 선택' })
+    for (const value of ['0', '1.5', '5']) {
+      fireEvent.change(count, { target: { value } })
+      expect(randomButton).toBeDisabled()
+    }
+    for (const value of ['1', '4']) {
+      fireEvent.change(count, { target: { value } })
+      expect(randomButton).toBeEnabled()
+      fireEvent.click(randomButton)
+      expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+      fireEvent.click(screen.getByRole('button', { name: '주제 직접 선택' }))
+    }
+  })
+
   it('라운드 주제와 투표자 공개 옵션을 서버 설정으로 전달한다', async () => {
     fetchMock
       .mockResolvedValueOnce(success(topics))

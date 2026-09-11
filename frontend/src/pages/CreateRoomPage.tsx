@@ -17,6 +17,7 @@ export function CreateRoomPage() {
   const [roundCount, setRoundCount] = useState(3)
   const [topics, setTopics] = useState<TtfTopic[]>([])
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([])
+  const [randomTopics, setRandomTopics] = useState(false)
   const [topicsLoading, setTopicsLoading] = useState(true)
   const [topicsError, setTopicsError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -74,6 +75,19 @@ export function CreateRoomPage() {
     })
   }
 
+  const canRandomizeTopics = !busy && !topicsLoading && !topicsError
+    && Number.isInteger(roundCount) && roundCount >= 1 && roundCount <= topics.length
+
+  const pickRandomTopics = () => {
+    const shuffled = [...topics]
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const randomIndex = Math.floor(Math.random() * (index + 1))
+      ;[shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]]
+    }
+    const selectedIds = new Set(shuffled.slice(0, roundCount).map((topic) => topic.id))
+    return topics.filter((topic) => selectedIds.has(topic.id)).map((topic) => topic.id)
+  }
+
   const create = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -97,7 +111,7 @@ export function CreateRoomPage() {
       setError(`라운드 수는 1~${topics.length || 8}개로 설정해 주세요.`)
       return
     }
-    if (selectedTopicIds.length !== roundCount) {
+    if (!randomTopics && selectedTopicIds.length !== roundCount) {
       setError(`라운드 주제를 ${roundCount}개 선택해 주세요.`)
       return
     }
@@ -116,7 +130,7 @@ export function CreateRoomPage() {
             speaker_order: speakerOrder,
             anonymous_voting: !showVoters,
             round_count: roundCount,
-            topic_ids: selectedTopicIds,
+            topic_ids: randomTopics ? pickRandomTopics() : selectedTopicIds,
           },
         },
       })
@@ -174,7 +188,15 @@ export function CreateRoomPage() {
 
           <fieldset className="topic-options">
             <legend>라운드 주제</legend>
-            <p>참가자 모두가 선택된 주제마다 세 문장을 준비해요. {selectedTopicIds.length} / {roundCount}개 선택</p>
+            <p>참가자 모두가 선택된 주제마다 세 문장을 준비해요.</p>
+            <button className="button button--secondary" disabled={randomTopics ? busy : !canRandomizeTopics} onClick={() => setRandomTopics((current) => !current)} type="button">
+              {randomTopics ? '주제 직접 선택' : '주제 랜덤 선택'}
+            </button>
+            {randomTopics ? (
+              <p role="status">랜덤 선택 중이에요. 방을 만들 때 라운드 수만큼 주제를 뽑아요. 어떤 주제인지는 방을 만든 뒤 확인해 주세요.</p>
+            ) : (
+              <p>{selectedTopicIds.length} / {roundCount}개 선택 · 랜덤 선택을 하면 방을 만들기 전에는 어떤 주제인지 알 수 없어요.</p>
+            )}
             {topicsLoading ? <p className="topic-options__state" role="status">주제를 불러오는 중…</p> : null}
             {topicsError ? (
               <div className="topic-options__state">
@@ -182,7 +204,7 @@ export function CreateRoomPage() {
                 <button className="text-button" onClick={retryTopics} type="button">다시 불러오기</button>
               </div>
             ) : null}
-            {topics.length ? (
+            {!randomTopics && topics.length ? (
               <div className="topic-grid">
                 {topics.map((topic) => {
                   const selected = selectedTopicIds.includes(topic.id)
